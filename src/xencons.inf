@@ -1,0 +1,113 @@
+; Copyright (c) Citrix Systems Inc.
+; All rights reserved.
+;
+; Redistribution and use in source and binary forms,
+; with or without modification, are permitted provided
+; that the following conditions are met:
+;
+; *   Redistributions of source code must retain the above
+;     copyright notice, this list of conditions and the
+;     following disclaimer.
+; *   Redistributions in binary form must reproduce the above
+;     copyright notice, this list of conditions and the
+;     following disclaimer in the documentation and/or other
+;     materials provided with the distribution.
+;
+; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+; CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+; INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+; MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+; DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+; CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+; SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+; BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+; SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+; WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+; OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+; SUCH DAMAGE.
+
+
+[Version]
+Signature="$Windows NT$"
+Class=System
+ClassGUID={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%Vendor%
+CatalogFile=xencons.cat
+DriverVer=01/01/1900,0.0.0.0
+DriverPackageDisplayName=%DiskDesc%
+
+[DestinationDirs]
+DefaultDestDir=12
+CoInst_CopyFiles=11
+
+[SourceDisksNames]
+0=%DiskDesc%
+
+[SourceDisksFiles]
+xencons.sys=0,,
+xencons_coinst.dll=0,,
+
+[CoInst_CopyFiles]
+xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,xencons_coinst.dll
+
+[Manufacturer]
+%Vendor%=Inst,NT$ARCH$
+
+[Inst.NT$ARCH$]
+; DisplayName		Section		DeviceID
+; -----------		-------		--------
+
+%XenconsName%		=Xencons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@@VENDOR_DEVICE_ID@&DEV_CONS&REV_09000000
+%XenconsName%		=Xencons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0001&DEV_CONS&REV_09000000
+%XenconsName%		=Xencons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0002&DEV_CONS&REV_09000000
+
+[Xencons_Inst]
+CopyFiles=Xencons_Copyfiles
+
+[Xencons_Copyfiles]
+xencons.sys
+
+[Xencons_Inst.Services]
+AddService=xencons,0x02,Xencons_Service,
+
+[Xencons_Service]
+DisplayName=%XenconsName%
+ServiceType=%SERVICE_KERNEL_DRIVER%
+StartType=%SERVICE_DEMAND_START%
+ErrorControl=%SERVICE_ERROR_NORMAL%
+ServiceBinary=%12%\xencons.sys
+LoadOrderGroup="Extended Base"
+AddReg = Xencons_BootFlags, Xencons_Parameters
+
+[Xencons_BootFlags]
+HKR,,"BootFlags",0x00010003,0x81
+
+[Xencons_Parameters]
+HKR,"Parameters",,0x00000010
+
+[Xencons_Inst.CoInstallers]
+CopyFiles=CoInst_CopyFiles
+AddReg=CoInst_AddReg
+
+[CoInst_AddReg]
+HKR,,CoInstallers32,0x00010000,"xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,Entry"
+
+[Strings]
+
+Vendor="@VENDOR_NAME@"
+DiskDesc="@PRODUCT_NAME@ PV Console Package"
+XenconsName="@PRODUCT_NAME@ PV Console"
+
+SERVICE_BOOT_START=0x0
+SERVICE_SYSTEM_START=0x1
+SERVICE_AUTO_START=0x2
+SERVICE_DEMAND_START=0x3
+SERVICE_DISABLED=0x4
+
+SERVICE_KERNEL_DRIVER=0x1
+SERVICE_ERROR_IGNORE=0x0
+SERVICE_ERROR_NORMAL=0x1
+SERVICE_ERROR_SEVERE=0x2
+SERVICE_ERROR_CRITICAL=0x3
