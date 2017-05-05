@@ -60,6 +60,8 @@ typedef struct _XENCONS_DX {
     PDEVICE_OBJECT      DeviceObject;
     DEVICE_OBJECT_TYPE  Type;
 
+    UNICODE_STRING      Link;
+
     DEVICE_PNP_STATE    DevicePnpState;
     DEVICE_PNP_STATE    PreviousDevicePnpState;
 

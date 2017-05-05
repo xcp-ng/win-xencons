@@ -29,43 +29,11 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _XENCONS_FDO_H
-#define _XENCONS_FDO_H
+#ifndef _XENCONS_DEVICE_H
+#define _XENCONS_DEVICE_H
 
-#include <ntddk.h>
-#include <debug_interface.h>
-#include <suspend_interface.h>
-#include <store_interface.h>
-#include <console_interface.h>
+// {0D3EDD21-8EF9-4DFF-856C-8C68BF4FDCA3}
+DEFINE_GUID(GUID_XENCONS_DEVICE,
+            0xd3edd21, 0x8ef9, 0x4dff, 0x85, 0x6c, 0x8c, 0x68, 0xbf, 0x4f, 0xdc, 0xa3);
 
-#include "driver.h"
-
-extern NTSTATUS
-FdoDispatch(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PIRP            Irp
-    );
-
-#define DECLARE_FDO_GET_INTERFACE(_Interface, _Type)    \
-extern VOID                                             \
-FdoGet ## _Interface ## Interface(                      \
-    IN  PXENCONS_FDO Fdo,                               \
-    OUT _Type        _Interface ## Interface            \
-    );
-
-DECLARE_FDO_GET_INTERFACE(Debug, PXENBUS_DEBUG_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Suspend, PXENBUS_SUSPEND_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Store, PXENBUS_STORE_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Console, PXENBUS_CONSOLE_INTERFACE)
-
-extern NTSTATUS
-FdoCreate(
-    IN  PDEVICE_OBJECT  PhysicalDeviceObject
-    );
-
-extern VOID
-FdoDestroy(
-    IN  PXENCONS_FDO    Fdo
-    );
-
-#endif  // _XENCONS_FDO_H
+#endif  // _XENCONS_DEVICE_H

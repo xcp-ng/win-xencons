@@ -67,6 +67,7 @@
     <ClCompile Include="../../src/xencons/driver.c" />
     <ClCompile Include="../../src/xencons/fdo.c" />
     <ClCompile Include="../../src/xencons/registry.c" />
+    <ClCompile Include="../../src/xencons/stream.c" />
     <ClCompile Include="../../src/xencons/thread.c" />
   </ItemGroup>
   <ItemGroup>

@@ -29,43 +29,30 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _XENCONS_FDO_H
-#define _XENCONS_FDO_H
+#ifndef _XENCONS_STREAM_H
+#define _XENCONS_STREAM_H
 
 #include <ntddk.h>
-#include <debug_interface.h>
-#include <suspend_interface.h>
-#include <store_interface.h>
-#include <console_interface.h>
 
-#include "driver.h"
+#include "fdo.h"
+
+typedef struct _XENCONS_STREAM XENCONS_STREAM, *PXENCONS_STREAM;
 
 extern NTSTATUS
-FdoDispatch(
+StreamCreate(
     IN  PXENCONS_FDO    Fdo,
-    IN  PIRP            Irp
-    );
-
-#define DECLARE_FDO_GET_INTERFACE(_Interface, _Type)    \
-extern VOID                                             \
-FdoGet ## _Interface ## Interface(                      \
-    IN  PXENCONS_FDO Fdo,                               \
-    OUT _Type        _Interface ## Interface            \
-    );
-
-DECLARE_FDO_GET_INTERFACE(Debug, PXENBUS_DEBUG_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Suspend, PXENBUS_SUSPEND_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Store, PXENBUS_STORE_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Console, PXENBUS_CONSOLE_INTERFACE)
-
-extern NTSTATUS
-FdoCreate(
-    IN  PDEVICE_OBJECT  PhysicalDeviceObject
+    OUT PXENCONS_STREAM *Stream
     );
 
 extern VOID
-FdoDestroy(
-    IN  PXENCONS_FDO    Fdo
+StreamDestroy(
+    IN  PXENCONS_STREAM Stream
     );
 
-#endif  // _XENCONS_FDO_H
+extern NTSTATUS
+StreamPutQueue(
+    IN  PXENCONS_STREAM Stream,
+    IN  PIRP            Irp
+    );
+
+#endif  // _XENCONS_STREAM_H
