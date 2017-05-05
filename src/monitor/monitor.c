@@ -58,10 +58,13 @@ typedef struct _MONITOR_CONTEXT {
     HANDLE                  StopEvent;
     HANDLE                  AddEvent;
     HANDLE                  RemoveEvent;
+    PTCHAR                  Executable;
     HDEVNOTIFY              InterfaceNotification;
     PTCHAR                  DevicePath;
     HDEVNOTIFY              DeviceNotification;
     HANDLE                  Device;
+    HANDLE                  ThreadEvent;
+    HANDLE                  Thread;
 } MONITOR_CONTEXT, *PMONITOR_CONTEXT;
 
 MONITOR_CONTEXT MonitorContext;
@@ -342,6 +345,117 @@ fail1:
     return FALSE;
 }
 
+DWORD WINAPI
+MonitorThread(
+    IN  LPVOID          Argument
+    )
+{
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    DWORD               CommandLineLength;
+    PTCHAR              CommandLine;
+    PROCESS_INFORMATION ProcessInfo;
+    STARTUPINFO         StartupInfo;
+    BOOL                Success;
+    HANDLE              Handle[2];
+    DWORD               Object;
+    HRESULT             Error;
+
+    UNREFERENCED_PARAMETER(Argument);
+
+    Log("====>");
+
+    CommandLineLength = (DWORD)(_tcslen(Context->Executable) +
+                                2 +
+                                _tcslen(Context->DevicePath) +
+                                2) * sizeof (TCHAR);
+
+    CommandLine = calloc(1, CommandLineLength);
+
+    if (CommandLine == NULL)
+        goto fail1;
+
+    (VOID) _sntprintf(CommandLine,
+                      CommandLineLength - 1,
+                      TEXT("%s \"%s\""),
+                      Context->Executable,
+                      Context->DevicePath);
+
+again:
+    ZeroMemory(&ProcessInfo, sizeof (ProcessInfo));
+    ZeroMemory(&StartupInfo, sizeof (StartupInfo));
+    StartupInfo.cb = sizeof (StartupInfo);
+
+    Log("Executing: %s", CommandLine);
+
+#pragma warning(suppress:6053) // CommandLine might not be NUL-terminated
+    Success = CreateProcess(NULL,
+                            CommandLine,
+                            NULL,
+                            NULL,
+                            FALSE,
+                            CREATE_NO_WINDOW |
+                            CREATE_NEW_PROCESS_GROUP,
+                            NULL,
+                            NULL,
+                            &StartupInfo,
+                            &ProcessInfo);
+    if (!Success)
+        goto fail2;
+
+    Handle[0] = Context->ThreadEvent;
+    Handle[1] = ProcessInfo.hProcess;
+
+    Object = WaitForMultipleObjects(ARRAYSIZE(Handle),
+                                   Handle,
+                                   FALSE,
+                                   INFINITE);
+
+#define WAIT_OBJECT_1 (WAIT_OBJECT_0 + 1)
+
+    switch (Object) {
+    case WAIT_OBJECT_0:
+        ResetEvent(Context->ThreadEvent);
+
+        TerminateProcess(ProcessInfo.hProcess, 1);
+        CloseHandle(ProcessInfo.hProcess);
+        CloseHandle(ProcessInfo.hThread);
+        break;
+
+    case WAIT_OBJECT_1:
+        CloseHandle(ProcessInfo.hProcess);
+        CloseHandle(ProcessInfo.hThread);
+        goto again;
+
+    default:
+        break;
+    }
+
+//#undef WAIT_OBJECT_1
+
+    free(CommandLine);
+
+    Log("<====");
+
+    return 0;
+
+fail2:
+    Log("fail2");
+
+    free(CommandLine);
+
+fail1:
+    Error = GetLastError();
+
+    {
+        PTCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return 1;
+}
+
 static VOID
 PutString(
     IN  HANDLE      Handle,
@@ -419,9 +533,42 @@ MonitorAdd(
 
     Context->DevicePath = Path;
 
+    Context->ThreadEvent = CreateEvent(NULL,
+                                       TRUE,
+                                       FALSE,
+                                       NULL);
+
+    if (Context->ThreadEvent == NULL)
+        goto fail4;
+
+    Context->Thread = CreateThread(NULL,
+                                   0,
+                                   MonitorThread,
+                                   NULL,
+                                   0,
+                                   NULL);
+
+    if (Context->Thread == INVALID_HANDLE_VALUE)
+        goto fail5;
+
     Log("<====");
 
     return;
+
+fail5:
+    Log("fail5");
+
+    CloseHandle(Context->ThreadEvent);
+    Context->ThreadEvent = NULL;
+
+fail4:
+    Log("fail4");
+
+    free(Context->DevicePath);
+    Context->DevicePath = NULL;
+
+    UnregisterDeviceNotification(Context->DeviceNotification);
+    Context->DeviceNotification = NULL;
 
 fail3:
     Log("fail3");
@@ -456,6 +603,12 @@ MonitorRemove(
         return;
 
     Log("====>");
+
+    SetEvent(Context->ThreadEvent);
+    WaitForSingleObject(Context->Thread, INFINITE);
+
+    CloseHandle(Context->ThreadEvent);
+    Context->ThreadEvent = NULL;
 
     free(Context->DevicePath);
     Context->DevicePath = NULL;
@@ -528,6 +681,84 @@ MonitorCtrlHandlerEx(
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
+static BOOL
+GetExecutable(
+    OUT PTCHAR          *Executable
+    )
+{
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    DWORD               MaxValueLength;
+    DWORD               ExecutableLength;
+    DWORD               Type;
+    HRESULT             Error;
+
+    Error = RegQueryInfoKey(Context->ParametersKey,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            &MaxValueLength,
+                            NULL,
+                            NULL);
+    if (Error != ERROR_SUCCESS) {
+        SetLastError(Error);
+        goto fail1;
+    }
+
+    ExecutableLength = MaxValueLength + sizeof (TCHAR);
+
+    *Executable = calloc(1, ExecutableLength);
+    if (Executable == NULL)
+        goto fail2;
+
+    Error = RegQueryValueEx(Context->ParametersKey,
+                            "Executable",
+                            NULL,
+                            &Type,
+                            (LPBYTE)(*Executable),
+                            &ExecutableLength);
+    if (Error != ERROR_SUCCESS) {
+        SetLastError(Error);
+        goto fail3;
+    }
+
+    if (Type != REG_SZ) {
+        SetLastError(ERROR_BAD_FORMAT);
+        goto fail4;
+    }
+
+    Log("%s", *Executable);
+
+    return TRUE;
+
+fail4:
+    Log("fail4");
+
+fail3:
+    Log("fail3");
+
+    free(*Executable);
+
+fail2:
+    Log("fail2");
+
+fail1:
+    Error = GetLastError();
+
+    {
+        PTCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return FALSE;
+}
+
 VOID WINAPI
 MonitorMain(
     _In_    DWORD                   argc,
@@ -537,6 +768,7 @@ MonitorMain(
     PMONITOR_CONTEXT                Context = &MonitorContext;
     DEV_BROADCAST_DEVICEINTERFACE   Interface;
     HRESULT                         Error;
+    BOOL                            Success;
 
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
@@ -591,6 +823,10 @@ MonitorMain(
     if (Context->RemoveEvent == NULL)
         goto fail6;
 
+    Success = GetExecutable(&Context->Executable);
+    if (!Success)
+        goto fail7;
+
     Context->Device = INVALID_HANDLE_VALUE;
 
     ZeroMemory(&Interface, sizeof (Interface));
@@ -603,7 +839,7 @@ MonitorMain(
                                    &Interface,
                                    DEVICE_NOTIFY_SERVICE_HANDLE);
     if (Context->InterfaceNotification == NULL)
-        goto fail7;
+        goto fail8;
 
     // The device may already by present
     SetEvent(Context->AddEvent);
@@ -655,6 +891,8 @@ done:
 
     UnregisterDeviceNotification(Context->InterfaceNotification);
 
+    free(Context->Executable);
+
     CloseHandle(Context->RemoveEvent);
 
     CloseHandle(Context->AddEvent);
@@ -670,6 +908,11 @@ done:
     Log("<====");
 
     return;
+
+fail8:
+    Log("fail8");
+
+    free(Context->Executable);
 
 fail7:
     Log("fail7");

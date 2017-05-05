@@ -42,6 +42,7 @@ DriverPackageDisplayName=%DiskDesc%
 DefaultDestDir=12
 CoInst_CopyFiles=11
 Monitor_CopyFiles=11
+Tty_CopyFiles=11
 
 [SourceDisksNames]
 0=%DiskDesc%
@@ -51,6 +52,7 @@ xencons.sys=0,,
 xencons_coinst.dll=0,,
 xencons_monitor.exe=0,,
 xencons_monitor.dll=0,,
+xencons_tty.exe=0,,
 
 [CoInst_CopyFiles]
 xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,xencons_coinst.dll
@@ -58,6 +60,9 @@ xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dl
 [Monitor_CopyFiles]
 xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,xencons_monitor.exe
 xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,xencons_monitor.dll
+
+[Tty_CopyFiles]
+xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,xencons_tty.exe
 
 [Manufacturer]
 %Vendor%=Inst,NT$ARCH$
@@ -73,6 +78,7 @@ xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.d
 [XenCons_Inst]
 CopyFiles=XenCons_Copyfiles
 CopyFiles=Monitor_Copyfiles
+CopyFiles=Tty_Copyfiles
 
 [XenCons_Copyfiles]
 xencons.sys
@@ -107,6 +113,7 @@ AddReg = Monitor_Parameters
 
 [Monitor_Parameters]
 HKR,"Parameters",,0x00000010
+HKR,"Parameters","Executable",0x00000000,"xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe"
 
 [Monitor_EventLog]
 AddReg=Monitor_EventLog_AddReg
