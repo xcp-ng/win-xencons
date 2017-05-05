@@ -2482,6 +2482,9 @@ DEFINE_FDO_GET_INTERFACE(Suspend, PXENBUS_SUSPEND_INTERFACE)
 DEFINE_FDO_GET_INTERFACE(Store, PXENBUS_STORE_INTERFACE)
 DEFINE_FDO_GET_INTERFACE(Console, PXENBUS_CONSOLE_INTERFACE)
 
+#pragma warning(push)
+#pragma warning(disable:6014) // Leaking memory '&Dx->Link'
+
 NTSTATUS
 FdoCreate(
     IN  PDEVICE_OBJECT      PhysicalDeviceObject
@@ -2736,3 +2739,5 @@ FdoDestroy(
 
     IoDeleteDevice(FunctionDeviceObject);
 }
+
+#pragma warning(pop)
