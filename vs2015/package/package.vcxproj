@@ -39,6 +39,9 @@
     <ProjectReference Include="..\xencons_coinst\xencons_coinst.vcxproj">
       <Project>{6CC9B8DD-A5AE-427D-8157-E91D21DD7E19}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\xencons_monitor\xencons_monitor.vcxproj">
+      <Project>{8991F0A5-408B-43E0-88CC-9550D4AAE616}</Project>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <FilesToPackage Include="$(DPINST_REDIST)\x86\dpinst.exe" Condition="'$(Platform)'=='Win32'" />

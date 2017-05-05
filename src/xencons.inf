@@ -41,6 +41,7 @@ DriverPackageDisplayName=%DiskDesc%
 [DestinationDirs]
 DefaultDestDir=12
 CoInst_CopyFiles=11
+Monitor_CopyFiles=11
 
 [SourceDisksNames]
 0=%DiskDesc%
@@ -48,9 +49,15 @@ CoInst_CopyFiles=11
 [SourceDisksFiles]
 xencons.sys=0,,
 xencons_coinst.dll=0,,
+xencons_monitor.exe=0,,
+xencons_monitor.dll=0,,
 
 [CoInst_CopyFiles]
 xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,xencons_coinst.dll
+
+[Monitor_CopyFiles]
+xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,xencons_monitor.exe
+xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,xencons_monitor.dll
 
 [Manufacturer]
 %Vendor%=Inst,NT$ARCH$
@@ -59,35 +66,56 @@ xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dl
 ; DisplayName		Section		DeviceID
 ; -----------		-------		--------
 
-%XenconsName%		=Xencons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@@VENDOR_DEVICE_ID@&DEV_CONS&REV_09000000
-%XenconsName%		=Xencons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0001&DEV_CONS&REV_09000000
-%XenconsName%		=Xencons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0002&DEV_CONS&REV_09000000
+%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@@VENDOR_DEVICE_ID@&DEV_CONS&REV_09000000
+%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0001&DEV_CONS&REV_09000000
+%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0002&DEV_CONS&REV_09000000
 
-[Xencons_Inst]
-CopyFiles=Xencons_Copyfiles
+[XenCons_Inst]
+CopyFiles=XenCons_Copyfiles
+CopyFiles=Monitor_Copyfiles
 
-[Xencons_Copyfiles]
+[XenCons_Copyfiles]
 xencons.sys
 
-[Xencons_Inst.Services]
-AddService=xencons,0x02,Xencons_Service,
+[XenCons_Inst.Services]
+AddService=xencons_monitor,%SPSVCSINST_STARTSERVICE%,Monitor_Service,Monitor_EventLog
+AddService=xencons,%SPSVCINST_ASSOCSERVICE%,XenCons_Service
 
-[Xencons_Service]
-DisplayName=%XenconsName%
+[XenCons_Service]
+DisplayName=%XenConsName%
 ServiceType=%SERVICE_KERNEL_DRIVER%
 StartType=%SERVICE_DEMAND_START%
 ErrorControl=%SERVICE_ERROR_NORMAL%
 ServiceBinary=%12%\xencons.sys
 LoadOrderGroup="Extended Base"
-AddReg = Xencons_BootFlags, Xencons_Parameters
+AddReg = XenCons_BootFlags, XenCons_Parameters
 
-[Xencons_BootFlags]
+[XenCons_BootFlags]
 HKR,,"BootFlags",0x00010003,0x81
 
-[Xencons_Parameters]
+[XenCons_Parameters]
 HKR,"Parameters",,0x00000010
 
-[Xencons_Inst.CoInstallers]
+[Monitor_Service]
+DisplayName=%MonitorName%
+Description=%MonitorDesc%
+ServiceType=%SERVICE_WIN32_OWN_PROCESS%
+StartType=%SERVICE_AUTO_START%
+ErrorControl=%SERVICE_ERROR_NORMAL%
+ServiceBinary=%11%\xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe
+AddReg = Monitor_Parameters
+
+[Monitor_Parameters]
+HKR,"Parameters",,0x00000010
+
+[Monitor_EventLog]
+AddReg=Monitor_EventLog_AddReg
+
+[Monitor_EventLog_AddReg]
+HKR,,EventMessageFile,0x00020000,"%%SystemRoot%%\System32\xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll"
+HKR,,TypesSupported,0x00010001,7
+
+[XenCons_Inst.CoInstallers]
 CopyFiles=CoInst_CopyFiles
 AddReg=CoInst_AddReg
 
@@ -98,7 +126,10 @@ HKR,,CoInstallers32,0x00010000,"xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@
 
 Vendor="@VENDOR_NAME@"
 DiskDesc="@PRODUCT_NAME@ PV Console Package"
-XenconsName="@PRODUCT_NAME@ PV Console"
+XenConsName="@PRODUCT_NAME@ PV Console"
+MonitorName="@PRODUCT_NAME@ PV Console Monitor"
+MonitorDesc="Provides a monitor for the @PRODUCT_NAME@ PV Console"
+
 
 SERVICE_BOOT_START=0x0
 SERVICE_SYSTEM_START=0x1
@@ -106,8 +137,12 @@ SERVICE_AUTO_START=0x2
 SERVICE_DEMAND_START=0x3
 SERVICE_DISABLED=0x4
 
+SERVICE_WIN32_OWN_PROCESS=0x10
 SERVICE_KERNEL_DRIVER=0x1
 SERVICE_ERROR_IGNORE=0x0
 SERVICE_ERROR_NORMAL=0x1
 SERVICE_ERROR_SEVERE=0x2
 SERVICE_ERROR_CRITICAL=0x3
+
+SPSVCINST_ASSOCSERVICE=0x00000002
+SPSVCSINST_STARTSERVICE=0x00000800

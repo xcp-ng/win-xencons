@@ -6,10 +6,13 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xencons", "xencons\xencons.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xencons_coinst", "xencons_coinst\xencons_coinst.vcxproj", "{6CC9B8DD-A5AE-427D-8157-E91D21DD7E19}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xencons_monitor", "xencons_monitor\xencons_monitor.vcxproj", "{8991F0A5-408B-43E0-88CC-9550D4AAE616}"
+EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "package", "package\package.vcxproj", "{8B5B8F4B-7FF3-4B64-AC4A-5246026217E7}"
 	ProjectSection(ProjectDependencies) = postProject
 		{4674B8C2-876B-4F2A-AB71-BAC968A9B529} = {4674B8C2-876B-4F2A-AB71-BAC968A9B529}
 		{6CC9B8DD-A5AE-427D-8157-E91D21DD7E19} = {6CC9B8DD-A5AE-427D-8157-E91D21DD7E19}
+		{8991F0A5-408B-43E0-88CC-9550D4AAE616} = {8991F0A5-408B-43E0-88CC-9550D4AAE616}
 	EndProjectSection
 EndProject
 Global

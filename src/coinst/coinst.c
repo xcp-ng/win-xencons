@@ -43,6 +43,8 @@ __user_code;
 
 #define MAXIMUM_BUFFER_SIZE 1024
 
+#define MONITOR_NAME    "XENCONS_MONITOR"
+
 static VOID
 #pragma prefast(suppress:6262) // Function uses '1036' bytes of stack: exceeds /analyze:stacksize'1024'
 __Log(
@@ -172,6 +174,79 @@ __FunctionName(
 #undef  _NAME
 }
 
+static BOOL
+MonitorDelete(
+    VOID
+    )
+{
+    SC_HANDLE           SCManager;
+    SC_HANDLE           Service;
+    BOOL                Success;
+    SERVICE_STATUS      Status;
+    HRESULT             Error;
+
+    Log("====>");
+
+    SCManager = OpenSCManager(NULL,
+                              NULL,
+                              SC_MANAGER_ALL_ACCESS);
+
+    if (SCManager == NULL)
+        goto fail1;
+
+    Service = OpenService(SCManager,
+                          MONITOR_NAME,
+                          SERVICE_ALL_ACCESS);
+
+    if (Service == NULL)
+        goto fail2;
+
+    Success = ControlService(Service,
+                             SERVICE_CONTROL_STOP,
+                             &Status);
+
+    if (!Success &&
+        GetLastError() != ERROR_SERVICE_NOT_ACTIVE)
+        goto fail3;
+
+    Success = DeleteService(Service);
+
+    if (!Success)
+        goto fail4;
+
+    CloseServiceHandle(Service);
+    CloseServiceHandle(SCManager);
+
+    Log("<====");
+
+    return TRUE;
+
+fail4:
+    Log("fail4");
+
+fail3:
+    Log("fail3");
+
+    CloseServiceHandle(Service);
+
+fail2:
+    Log("fail2");
+
+    CloseServiceHandle(SCManager);
+
+fail1:
+    Error = GetLastError();
+
+    {
+        PTCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return FALSE;
+}
+
 static HRESULT
 DifInstallPreProcess(
     IN  HDEVINFO                    DeviceInfoSet,
@@ -271,7 +346,11 @@ DifRemovePreProcess(
     UNREFERENCED_PARAMETER(DeviceInfoData);
     UNREFERENCED_PARAMETER(Context);
 
-    Log("<===>");
+    Log("====>");
+
+    (VOID) MonitorDelete();
+
+    Log("<====");
 
     return NO_ERROR;
 }
