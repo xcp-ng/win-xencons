@@ -432,6 +432,8 @@ PipeThread(
     LeaveCriticalSection(&Context->CriticalSection);
 
     for (;;) {
+        DWORD           Written;
+
         (VOID) ReadFile(Pipe->Pipe,
                         Buffer,
                         sizeof(Buffer),
@@ -453,7 +455,11 @@ PipeThread(
 
         ResetEvent(Overlapped.hEvent);
 
-        // Length bytes of Buffer have been read
+        WriteFile(Context->Device,
+                  Buffer,
+                  Length,
+                  &Written,
+                  NULL);
     }
 
     EnterCriticalSection(&Context->CriticalSection);
@@ -725,6 +731,8 @@ DeviceThread(
         goto fail2;
 
     for (;;) {
+        PLIST_ENTRY     ListEntry;
+
         (VOID) ReadFile(Device,
                         Buffer,
                         sizeof(Buffer),
@@ -746,7 +754,23 @@ DeviceThread(
 
         ResetEvent(Overlapped.hEvent);
 
-        // Length bytes of Buffer have been read
+        EnterCriticalSection(&Context->CriticalSection);
+
+        for (ListEntry = Context->ListHead.Flink;
+             ListEntry != &Context->ListHead;
+             ListEntry = ListEntry->Flink) {
+            PMONITOR_PIPE   Instance;
+            DWORD           Written;
+
+            Instance = CONTAINING_RECORD(ListEntry, MONITOR_PIPE, ListEntry);
+
+            WriteFile(Instance->Pipe,
+                      Buffer,
+                      Length,
+                      &Written,
+                      NULL);
+        }
+        LeaveCriticalSection(&Context->CriticalSection);
     }
 
     CloseHandle(Device);
