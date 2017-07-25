@@ -65,6 +65,8 @@ typedef struct _MONITOR_CONTEXT {
     HANDLE                  Device;
     HANDLE                  MonitorEvent;
     HANDLE                  MonitorThread;
+    HANDLE                  DeviceEvent;
+    HANDLE                  DeviceThread;
 } MONITOR_CONTEXT, *PMONITOR_CONTEXT;
 
 MONITOR_CONTEXT MonitorContext;
@@ -456,6 +458,96 @@ fail1:
     return 1;
 }
 
+DWORD WINAPI
+DeviceThread(
+    IN  LPVOID          Argument
+    )
+{
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    OVERLAPPED          Overlapped;
+    HANDLE              Device;
+    UCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
+    DWORD               Length;
+    DWORD               Wait;
+    HANDLE              Handles[2];
+    DWORD               Error;
+
+    UNREFERENCED_PARAMETER(Argument);
+
+    Log("====>");
+
+    ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
+    Overlapped.hEvent = CreateEvent(NULL,
+                                    TRUE,
+                                    FALSE,
+                                    NULL);
+    if (Overlapped.hEvent == NULL)
+        goto fail1;
+
+    Handles[0] = Context->DeviceEvent;
+    Handles[1] = Overlapped.hEvent;
+
+    Device = CreateFile(Context->DevicePath,
+                        GENERIC_READ,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        NULL,
+                        OPEN_EXISTING,
+                        FILE_FLAG_OVERLAPPED,
+                        NULL);
+    if (Device == INVALID_HANDLE_VALUE)
+        goto fail2;
+
+    for (;;) {
+        (VOID) ReadFile(Device,
+                        Buffer,
+                        sizeof(Buffer),
+                        NULL,
+                        &Overlapped);
+
+        Wait = WaitForMultipleObjects(ARRAYSIZE(Handles),
+                                      Handles,
+                                      FALSE,
+                                      INFINITE);
+        if (Wait == WAIT_OBJECT_0)
+            break;
+
+        if (!GetOverlappedResult(Device,
+                                 &Overlapped,
+                                 &Length,
+                                 FALSE))
+            break;
+
+        ResetEvent(Overlapped.hEvent);
+
+        // Length bytes of Buffer have been read
+    }
+
+    CloseHandle(Device);
+
+    CloseHandle(Overlapped.hEvent);
+
+    Log("<====");
+
+    return 0;
+
+fail2:
+    Log("fail2\n");
+
+    CloseHandle(Overlapped.hEvent);
+
+fail1:
+    Error = GetLastError();
+
+    {
+        PTCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return 1;
+}
+
 static VOID
 PutString(
     IN  HANDLE      Handle,
@@ -551,9 +643,39 @@ MonitorAdd(
     if (Context->MonitorThread == INVALID_HANDLE_VALUE)
         goto fail5;
 
+    Context->DeviceEvent = CreateEvent(NULL,
+                                       TRUE,
+                                       FALSE,
+                                       NULL);
+
+    if (Context->DeviceEvent == NULL)
+        goto fail6;
+
+    Context->DeviceThread = CreateThread(NULL,
+                                         0,
+                                         DeviceThread,
+                                         NULL,
+                                         0,
+                                         NULL);
+
+    if (Context->DeviceThread == INVALID_HANDLE_VALUE)
+        goto fail7;
+
     Log("<====");
 
     return;
+
+fail7:
+    Log("fail7\n");
+
+    CloseHandle(Context->DeviceEvent);
+    Context->DeviceEvent = NULL;
+
+fail6:
+    Log("fail6\n");
+
+    SetEvent(Context->MonitorThread);
+    WaitForSingleObject(Context->MonitorThread, INFINITE);
 
 fail5:
     Log("fail5");
@@ -603,6 +725,12 @@ MonitorRemove(
         return;
 
     Log("====>");
+
+    SetEvent(Context->DeviceEvent);
+    WaitForSingleObject(Context->DeviceThread, INFINITE);
+
+    CloseHandle(Context->DeviceEvent);
+    Context->DeviceEvent = NULL;
 
     SetEvent(Context->MonitorEvent);
     WaitForSingleObject(Context->MonitorThread, INFINITE);
