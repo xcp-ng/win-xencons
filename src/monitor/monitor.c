@@ -586,8 +586,6 @@ MonitorThread(
     )
 {
     PMONITOR_CONTEXT    Context = &MonitorContext;
-    DWORD               CommandLineLength;
-    PTCHAR              CommandLine;
     PROCESS_INFORMATION ProcessInfo;
     STARTUPINFO         StartupInfo;
     BOOL                Success;
@@ -599,32 +597,16 @@ MonitorThread(
 
     Log("====>");
 
-    CommandLineLength = (DWORD)(_tcslen(Context->Executable) +
-                                2 +
-                                _tcslen(Context->DevicePath) +
-                                2) * sizeof (TCHAR);
-
-    CommandLine = calloc(1, CommandLineLength);
-
-    if (CommandLine == NULL)
-        goto fail1;
-
-    (VOID) _sntprintf(CommandLine,
-                      CommandLineLength - 1,
-                      TEXT("%s \"%s\""),
-                      Context->Executable,
-                      Context->DevicePath);
-
 again:
     ZeroMemory(&ProcessInfo, sizeof (ProcessInfo));
     ZeroMemory(&StartupInfo, sizeof (StartupInfo));
     StartupInfo.cb = sizeof (StartupInfo);
 
-    Log("Executing: %s", CommandLine);
+    Log("Executing: %s", Context->Executable);
 
 #pragma warning(suppress:6053) // CommandLine might not be NUL-terminated
     Success = CreateProcess(NULL,
-                            CommandLine,
+                            Context->Executable,
                             NULL,
                             NULL,
                             FALSE,
@@ -635,7 +617,7 @@ again:
                             &StartupInfo,
                             &ProcessInfo);
     if (!Success)
-        goto fail2;
+        goto fail1;
 
     Handle[0] = Context->MonitorEvent;
     Handle[1] = ProcessInfo.hProcess;
@@ -667,16 +649,9 @@ again:
 
 //#undef WAIT_OBJECT_1
 
-    free(CommandLine);
-
     Log("<====");
 
     return 0;
-
-fail2:
-    Log("fail2");
-
-    free(CommandLine);
 
 fail1:
     Error = GetLastError();

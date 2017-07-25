@@ -39,6 +39,7 @@ typedef struct _TTY_STREAM {
     HANDLE  Write;
 } TTY_STREAM, *PTTY_STREAM;
 
+#define PIPE_NAME TEXT("\\\\.\\pipe\\xencons")
 #define MAXIMUM_BUFFER_SIZE 1024
 
 typedef struct _TTY_CONTEXT {
@@ -393,18 +394,15 @@ _tmain(
     )
 {
     PTTY_CONTEXT        Context = &TtyContext;
-    PTCHAR              DeviceName;
     SECURITY_ATTRIBUTES Attributes;
     HANDLE              Handle[3];
     DWORD               Index;
     BOOL                Success;
 
-    if (argc != 2)
-        ExitProcess(1);
+    UNREFERENCED_PARAMETER(argc);
+    UNREFERENCED_PARAMETER(argv);
 
-    DeviceName = argv[1];
-
-    Context->Device.Read = CreateFile(DeviceName,
+    Context->Device.Read = CreateFile(PIPE_NAME,
                                       GENERIC_READ,
                                       FILE_SHARE_WRITE,
                                       NULL,
@@ -415,7 +413,7 @@ _tmain(
     if (Context->Device.Read == INVALID_HANDLE_VALUE)
         ExitProcess(1);
 
-    Context->Device.Write = CreateFile(DeviceName,
+    Context->Device.Write = CreateFile(PIPE_NAME,
                                        GENERIC_WRITE,
                                        FILE_SHARE_READ | FILE_SHARE_WRITE,
                                        NULL,
@@ -423,7 +421,7 @@ _tmain(
                                        FILE_ATTRIBUTE_NORMAL,
                                        NULL);
 
-    if (Context->Device.Read == INVALID_HANDLE_VALUE)
+    if (Context->Device.Write == INVALID_HANDLE_VALUE)
         ExitProcess(1);
 
     Success = GetCredentials();
