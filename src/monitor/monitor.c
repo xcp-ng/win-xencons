@@ -63,8 +63,8 @@ typedef struct _MONITOR_CONTEXT {
     PTCHAR                  DevicePath;
     HDEVNOTIFY              DeviceNotification;
     HANDLE                  Device;
-    HANDLE                  ThreadEvent;
-    HANDLE                  Thread;
+    HANDLE                  MonitorEvent;
+    HANDLE                  MonitorThread;
 } MONITOR_CONTEXT, *PMONITOR_CONTEXT;
 
 MONITOR_CONTEXT MonitorContext;
@@ -402,7 +402,7 @@ again:
     if (!Success)
         goto fail2;
 
-    Handle[0] = Context->ThreadEvent;
+    Handle[0] = Context->MonitorEvent;
     Handle[1] = ProcessInfo.hProcess;
 
     Object = WaitForMultipleObjects(ARRAYSIZE(Handle),
@@ -414,7 +414,7 @@ again:
 
     switch (Object) {
     case WAIT_OBJECT_0:
-        ResetEvent(Context->ThreadEvent);
+        ResetEvent(Context->MonitorEvent);
 
         TerminateProcess(ProcessInfo.hProcess, 1);
         CloseHandle(ProcessInfo.hProcess);
@@ -533,22 +533,22 @@ MonitorAdd(
 
     Context->DevicePath = Path;
 
-    Context->ThreadEvent = CreateEvent(NULL,
-                                       TRUE,
-                                       FALSE,
-                                       NULL);
+    Context->MonitorEvent = CreateEvent(NULL,
+                                        TRUE,
+                                        FALSE,
+                                        NULL);
 
-    if (Context->ThreadEvent == NULL)
+    if (Context->MonitorEvent == NULL)
         goto fail4;
 
-    Context->Thread = CreateThread(NULL,
-                                   0,
-                                   MonitorThread,
-                                   NULL,
-                                   0,
-                                   NULL);
+    Context->MonitorThread = CreateThread(NULL,
+                                          0,
+                                          MonitorThread,
+                                          NULL,
+                                          0,
+                                          NULL);
 
-    if (Context->Thread == INVALID_HANDLE_VALUE)
+    if (Context->MonitorThread == INVALID_HANDLE_VALUE)
         goto fail5;
 
     Log("<====");
@@ -558,8 +558,8 @@ MonitorAdd(
 fail5:
     Log("fail5");
 
-    CloseHandle(Context->ThreadEvent);
-    Context->ThreadEvent = NULL;
+    CloseHandle(Context->MonitorEvent);
+    Context->MonitorEvent = NULL;
 
 fail4:
     Log("fail4");
@@ -604,11 +604,11 @@ MonitorRemove(
 
     Log("====>");
 
-    SetEvent(Context->ThreadEvent);
-    WaitForSingleObject(Context->Thread, INFINITE);
+    SetEvent(Context->MonitorEvent);
+    WaitForSingleObject(Context->MonitorThread, INFINITE);
 
-    CloseHandle(Context->ThreadEvent);
-    Context->ThreadEvent = NULL;
+    CloseHandle(Context->MonitorEvent);
+    Context->MonitorEvent = NULL;
 
     free(Context->DevicePath);
     Context->DevicePath = NULL;
