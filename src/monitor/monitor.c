@@ -597,6 +597,10 @@ MonitorThread(
 
     Log("====>");
 
+    // If there is no executable, this thread can finish now.
+    if (Context->Executable == NULL)
+        goto done;
+
 again:
     ZeroMemory(&ProcessInfo, sizeof (ProcessInfo));
     ZeroMemory(&StartupInfo, sizeof (StartupInfo));
@@ -649,6 +653,7 @@ again:
 
 //#undef WAIT_OBJECT_1
 
+done:
     Log("<====");
 
     return 0;
@@ -1272,7 +1277,7 @@ MonitorMain(
 
     Success = GetExecutable(&Context->Executable);
     if (!Success)
-        goto fail7;
+        Context->Executable = NULL;
 
     Context->Device = INVALID_HANDLE_VALUE;
 
@@ -1286,7 +1291,7 @@ MonitorMain(
                                    &Interface,
                                    DEVICE_NOTIFY_SERVICE_HANDLE);
     if (Context->InterfaceNotification == NULL)
-        goto fail8;
+        goto fail7;
 
     // The device may already by present
     SetEvent(Context->AddEvent);
@@ -1355,11 +1360,6 @@ done:
     Log("<====");
 
     return;
-
-fail8:
-    Log("fail8");
-
-    free(Context->Executable);
 
 fail7:
     Log("fail7");
