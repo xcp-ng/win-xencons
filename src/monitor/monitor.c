@@ -50,6 +50,13 @@
 #define MONITOR_NAME        __MODULE__
 #define MONITOR_DISPLAYNAME MONITOR_NAME
 
+typedef struct _MONITOR_PIPE {
+    HANDLE                  Pipe;
+    HANDLE                  Event;
+    HANDLE                  Thread;
+    LIST_ENTRY              ListEntry;
+} MONITOR_PIPE, *PMONITOR_PIPE;
+
 typedef struct _MONITOR_CONTEXT {
     SERVICE_STATUS          Status;
     SERVICE_STATUS_HANDLE   Service;
@@ -67,9 +74,16 @@ typedef struct _MONITOR_CONTEXT {
     HANDLE                  MonitorThread;
     HANDLE                  DeviceEvent;
     HANDLE                  DeviceThread;
+    HANDLE                  ServerEvent;
+    HANDLE                  ServerThread;
+    CRITICAL_SECTION        CriticalSection;
+    LIST_ENTRY              ListHead;
+    DWORD                   ListCount;
 } MONITOR_CONTEXT, *PMONITOR_CONTEXT;
 
 MONITOR_CONTEXT MonitorContext;
+
+#define PIPE_NAME TEXT("\\\\.\\pipe\\xencons")
 
 #define MAXIMUM_BUFFER_SIZE 1024
 
@@ -345,6 +359,219 @@ fail1:
     }
 
     return FALSE;
+}
+
+static FORCEINLINE VOID
+__InitializeListHead(
+    IN  PLIST_ENTRY ListEntry
+    )
+{
+    ListEntry->Flink = ListEntry;
+    ListEntry->Blink = ListEntry;
+}
+
+static FORCEINLINE VOID
+__InsertTailList(
+    IN  PLIST_ENTRY ListHead,
+    IN  PLIST_ENTRY ListEntry
+    )
+{
+    ListEntry->Blink = ListHead->Blink;
+    ListEntry->Flink = ListHead;
+    ListHead->Blink->Flink = ListEntry;
+    ListHead->Blink = ListEntry;
+}
+
+static FORCEINLINE VOID
+__RemoveEntryList(
+    IN  PLIST_ENTRY ListEntry
+    )
+{
+    PLIST_ENTRY     Flink;
+    PLIST_ENTRY     Blink;
+
+    Flink = ListEntry->Flink;
+    Blink = ListEntry->Blink;
+    Flink->Blink = Blink;
+    Blink->Flink = Flink;
+
+    ListEntry->Flink = ListEntry;
+    ListEntry->Blink = ListEntry;
+}
+
+DWORD WINAPI
+PipeThread(
+    IN  LPVOID          Argument
+    )
+{
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    PMONITOR_PIPE       Pipe = (PMONITOR_PIPE)Argument;
+    UCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
+    OVERLAPPED          Overlapped;
+    HANDLE              Handle[2];
+    DWORD               Length;
+    DWORD               Object;
+    HRESULT             Error;
+
+    Log("====>");
+
+    ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
+    Overlapped.hEvent = CreateEvent(NULL,
+                                    TRUE,
+                                    FALSE,
+                                    NULL);
+    if (Overlapped.hEvent == NULL)
+        goto fail1;
+
+    Handle[0] = Pipe->Event;
+    Handle[1] = Overlapped.hEvent;
+
+    EnterCriticalSection(&Context->CriticalSection);
+    __InsertTailList(&Context->ListHead, &Pipe->ListEntry);
+    ++Context->ListCount;
+    LeaveCriticalSection(&Context->CriticalSection);
+
+    for (;;) {
+        (VOID) ReadFile(Pipe->Pipe,
+                        Buffer,
+                        sizeof(Buffer),
+                        NULL,
+                        &Overlapped);
+
+        Object = WaitForMultipleObjects(ARRAYSIZE(Handle),
+                                        Handle,
+                                        FALSE,
+                                        INFINITE);
+        if (Object == WAIT_OBJECT_0)
+            break;
+
+        if (!GetOverlappedResult(Pipe->Pipe,
+                                 &Overlapped,
+                                 &Length,
+                                 FALSE))
+            break;
+
+        ResetEvent(Overlapped.hEvent);
+
+        // Length bytes of Buffer have been read
+    }
+
+    EnterCriticalSection(&Context->CriticalSection);
+    __RemoveEntryList(&Pipe->ListEntry);
+    --Context->ListCount;
+    LeaveCriticalSection(&Context->CriticalSection);
+
+    CloseHandle(Overlapped.hEvent);
+
+    Log("<====");
+
+    return 0;
+
+fail1:
+    Error = GetLastError();
+
+    {
+        PTCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return 1;
+}
+
+DWORD WINAPI
+ServerThread(
+    IN  LPVOID          Argument
+    )
+{
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    OVERLAPPED          Overlapped;
+    HANDLE              Handle[2];
+    DWORD               Object;
+    HRESULT             Error;
+
+    UNREFERENCED_PARAMETER(Argument);
+
+    Log("====>");
+
+    ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
+    Overlapped.hEvent = CreateEvent(NULL,
+                                    TRUE,
+                                    FALSE,
+                                    NULL);
+    if (Overlapped.hEvent == NULL)
+        goto fail1;
+
+    Handle[0] = Context->ServerEvent;
+    Handle[1] = Overlapped.hEvent;
+
+    for (;;) {
+        HANDLE          Pipe;
+        PMONITOR_PIPE   Instance;
+
+        Pipe = CreateNamedPipe(PIPE_NAME,
+                               PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                               PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE,
+                               PIPE_UNLIMITED_INSTANCES,
+                               MAXIMUM_BUFFER_SIZE,
+                               MAXIMUM_BUFFER_SIZE,
+                               0,
+                               NULL);
+        if (Pipe == INVALID_HANDLE_VALUE)
+            break;
+
+        (VOID) ConnectNamedPipe(Pipe,
+                                &Overlapped);
+
+        Object = WaitForMultipleObjects(ARRAYSIZE(Handle),
+                                        Handle,
+                                        FALSE,
+                                        INFINITE);
+        if (Object == WAIT_OBJECT_0)
+            break;
+
+        ResetEvent(Overlapped.hEvent);
+
+        Instance = (PMONITOR_PIPE)malloc(sizeof(MONITOR_PIPE));
+        if (Instance == NULL) {
+            CloseHandle(Pipe);
+            break;
+        }
+
+        __InitializeListHead(&Instance->ListEntry);
+        Instance->Pipe = Pipe;
+        Instance->Event = Context->ServerEvent;
+        Instance->Thread = CreateThread(NULL,
+                                        0,
+                                        PipeThread,
+                                        Instance,
+                                        0,
+                                        NULL);
+        if (Instance->Thread == INVALID_HANDLE_VALUE) {
+            free(Instance);
+            CloseHandle(Pipe);
+            break;
+        }
+    }
+
+    CloseHandle(Overlapped.hEvent);
+
+    Log("<====");
+
+    return 0;
+
+fail1:
+    Error = GetLastError();
+
+    {
+        PTCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return 1;
 }
 
 DWORD WINAPI
@@ -624,6 +851,8 @@ MonitorAdd(
         goto fail3;
 
     Context->DevicePath = Path;
+    __InitializeListHead(&Context->ListHead);
+    InitializeCriticalSection(&Context->CriticalSection);
 
     Context->MonitorEvent = CreateEvent(NULL,
                                         TRUE,
@@ -661,9 +890,37 @@ MonitorAdd(
     if (Context->DeviceThread == INVALID_HANDLE_VALUE)
         goto fail7;
 
+    Context->ServerEvent = CreateEvent(NULL,
+                                       TRUE,
+                                       FALSE,
+                                       NULL);
+    if (Context->ServerEvent == NULL)
+        goto fail8;
+
+    Context->ServerThread = CreateThread(NULL,
+                                         0,
+                                         ServerThread,
+                                         NULL,
+                                         0,
+                                         NULL);
+    if (Context->ServerThread == INVALID_HANDLE_VALUE)
+        goto fail9;
+
     Log("<====");
 
     return;
+
+fail9:
+    Log("fail9");
+
+    CloseHandle(Context->ServerEvent);
+    Context->ServerEvent = NULL;
+
+fail8:
+    Log("fail8");
+
+    SetEvent(Context->DeviceEvent);
+    WaitForSingleObject(Context->DeviceThread, INFINITE);
 
 fail7:
     Log("fail7\n");
@@ -685,6 +942,9 @@ fail5:
 
 fail4:
     Log("fail4");
+
+    DeleteCriticalSection(&Context->CriticalSection);
+    ZeroMemory(&Context->ListHead, sizeof(LIST_ENTRY));
 
     free(Context->DevicePath);
     Context->DevicePath = NULL;
@@ -715,6 +975,56 @@ fail1:
 }
 
 static VOID
+MonitorWaitForPipeThreads(
+    VOID
+    )
+{
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    HANDLE              *Handles;
+    DWORD               Index;
+    PLIST_ENTRY         ListEntry;
+
+    EnterCriticalSection(&Context->CriticalSection);
+
+    if (Context->ListCount == 0)
+        goto fail1;
+
+    Handles = (HANDLE*)malloc(sizeof(HANDLE) * Context->ListCount);
+    if (Handles == NULL)
+        goto fail2;
+
+    Index = 0;
+    for (ListEntry = Context->ListHead.Flink;
+         ListEntry != &Context->ListHead && Index < Context->ListCount;
+         ListEntry = ListEntry->Flink) {
+        PMONITOR_PIPE Pipe = CONTAINING_RECORD(ListEntry, MONITOR_PIPE, ListEntry);
+        Handles[Index++] = Pipe->Thread;
+    }
+
+    Context->ListCount = 0;
+
+    LeaveCriticalSection(&Context->CriticalSection);
+
+#pragma warning(suppress:6385) // Reading invalid data from 'Handles'...
+    WaitForMultipleObjects(Index,
+                           Handles,
+                           TRUE,
+                           INFINITE);
+    free(Handles);
+    return;
+
+fail2:
+    Log("fail2");
+
+fail1:
+    Log("fail1");
+
+    LeaveCriticalSection(&Context->CriticalSection);
+
+    return;
+}
+
+static VOID
 MonitorRemove(
     VOID
     )
@@ -725,6 +1035,13 @@ MonitorRemove(
         return;
 
     Log("====>");
+
+    SetEvent(Context->ServerEvent);
+    MonitorWaitForPipeThreads();
+    WaitForSingleObject(Context->ServerThread, INFINITE);
+
+    CloseHandle(Context->ServerEvent);
+    Context->ServerEvent = NULL;
 
     SetEvent(Context->DeviceEvent);
     WaitForSingleObject(Context->DeviceThread, INFINITE);
@@ -737,6 +1054,9 @@ MonitorRemove(
 
     CloseHandle(Context->MonitorEvent);
     Context->MonitorEvent = NULL;
+
+    DeleteCriticalSection(&Context->CriticalSection);
+    ZeroMemory(&Context->ListHead, sizeof(LIST_ENTRY));
 
     free(Context->DevicePath);
     Context->DevicePath = NULL;
