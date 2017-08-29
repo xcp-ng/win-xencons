@@ -188,7 +188,7 @@ StreamCsqCompleteCanceledIrp(
     Irp->IoStatus.Information = 0;
     Irp->IoStatus.Status = STATUS_CANCELLED;
 
-    Trace("COMPLETE (%02x:%s)\n",
+    Trace("CANCELLED (%02x:%s)\n",
           MajorFunction,
           MajorFunctionName(MajorFunction));
 
@@ -417,6 +417,18 @@ StreamDestroy(
     ThreadAlert(Stream->Thread);
     ThreadJoin(Stream->Thread);
     Stream->Thread = NULL;
+
+    for (;;) {
+        PIRP    Irp;
+
+        Irp = IoCsqRemoveNextIrp(&Stream->Csq, NULL);
+        if (Irp == NULL)
+            break;
+
+        StreamCsqCompleteCanceledIrp(&Stream->Csq,
+                                     Irp);
+    }
+    ASSERT(IsListEmpty(&Stream->List));
 
     RtlZeroMemory(&Stream->Csq, sizeof (IO_CSQ));
 
