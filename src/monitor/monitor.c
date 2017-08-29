@@ -399,6 +399,32 @@ __RemoveEntryList(
     ListEntry->Blink = ListEntry;
 }
 
+static VOID
+PutString(
+    IN  HANDLE      Handle,
+    IN  PUCHAR      Buffer,
+    IN  DWORD       Length
+    )
+{
+    DWORD           Offset;
+
+    Offset = 0;
+    while (Offset < Length) {
+        DWORD   Written;
+        BOOL    Success;
+
+        Success = WriteFile(Handle,
+                            &Buffer[Offset],
+                            Length - Offset,
+                            &Written,
+                            NULL);
+        if (!Success)
+            break;
+
+        Offset += Written;
+    }
+}
+
 DWORD WINAPI
 PipeThread(
     IN  LPVOID          Argument
@@ -432,8 +458,6 @@ PipeThread(
     LeaveCriticalSection(&Context->CriticalSection);
 
     for (;;) {
-        DWORD           Written;
-
         (VOID) ReadFile(Pipe->Pipe,
                         Buffer,
                         sizeof(Buffer),
@@ -455,11 +479,9 @@ PipeThread(
 
         ResetEvent(Overlapped.hEvent);
 
-        WriteFile(Context->Device,
+        PutString(Context->Device,
                   Buffer,
-                  Length,
-                  &Written,
-                  NULL);
+                  Length);
     }
 
     EnterCriticalSection(&Context->CriticalSection);
@@ -753,15 +775,12 @@ DeviceThread(
              ListEntry != &Context->ListHead;
              ListEntry = ListEntry->Flink) {
             PMONITOR_PIPE   Instance;
-            DWORD           Written;
 
             Instance = CONTAINING_RECORD(ListEntry, MONITOR_PIPE, ListEntry);
 
-            WriteFile(Instance->Pipe,
+            PutString(Instance->Pipe,
                       Buffer,
-                      Length,
-                      &Written,
-                      NULL);
+                      Length);
         }
         LeaveCriticalSection(&Context->CriticalSection);
     }
@@ -792,34 +811,8 @@ fail1:
     return 1;
 }
 
-static VOID
-PutString(
-    IN  HANDLE      Handle,
-    IN  PTCHAR      Buffer,
-    IN  DWORD       Length
-    )
-{
-    DWORD           Offset;
-
-    Offset = 0;
-    while (Offset < Length) {
-        DWORD   Written;
-        BOOL    Success;
-
-        Success = WriteFile(Handle,
-                            &Buffer[Offset],
-                            Length - Offset,
-                            &Written,
-                            NULL);
-        if (!Success)
-            break;
-
-        Offset += Written;
-    }
-}
-
 #define ECHO(_Handle, _Buffer) \
-    PutString((_Handle), TEXT(_Buffer), (DWORD)_tcslen(_Buffer))
+    PutString((_Handle), (PUCHAR)TEXT(_Buffer), (DWORD)_tcslen((_Buffer)) * sizeof(TCHAR))
 
 static VOID
 MonitorAdd(
