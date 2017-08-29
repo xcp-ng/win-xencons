@@ -491,6 +491,8 @@ PipeThread(
 
     CloseHandle(Overlapped.hEvent);
 
+    FlushFileBuffers(Pipe->Pipe);
+    DisconnectNamedPipe(Pipe->Pipe);
     CloseHandle(Pipe->Pipe);
     CloseHandle(Pipe->Thread);
     free(Pipe);
