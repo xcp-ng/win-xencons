@@ -469,6 +469,10 @@ PipeThread(
 
     CloseHandle(Overlapped.hEvent);
 
+    CloseHandle(Pipe->Pipe);
+    CloseHandle(Pipe->Thread);
+    free(Pipe);
+
     Log("<====");
 
     return 0;
@@ -494,7 +498,9 @@ ServerThread(
     PMONITOR_CONTEXT    Context = &MonitorContext;
     OVERLAPPED          Overlapped;
     HANDLE              Handle[2];
+    HANDLE              Pipe;
     DWORD               Object;
+    PMONITOR_PIPE       Instance;
     HRESULT             Error;
 
     UNREFERENCED_PARAMETER(Argument);
@@ -513,9 +519,6 @@ ServerThread(
     Handle[1] = Overlapped.hEvent;
 
     for (;;) {
-        HANDLE          Pipe;
-        PMONITOR_PIPE   Instance;
-
         Pipe = CreateNamedPipe(PIPE_NAME,
                                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE,
@@ -525,7 +528,7 @@ ServerThread(
                                0,
                                NULL);
         if (Pipe == INVALID_HANDLE_VALUE)
-            break;
+            goto fail2;
 
         (VOID) ConnectNamedPipe(Pipe,
                                 &Overlapped);
@@ -534,16 +537,16 @@ ServerThread(
                                         Handle,
                                         FALSE,
                                         INFINITE);
-        if (Object == WAIT_OBJECT_0)
+        if (Object == WAIT_OBJECT_0) {
+            CloseHandle(Pipe);
             break;
+        }
 
         ResetEvent(Overlapped.hEvent);
 
         Instance = (PMONITOR_PIPE)malloc(sizeof(MONITOR_PIPE));
-        if (Instance == NULL) {
-            CloseHandle(Pipe);
-            break;
-        }
+        if (Instance == NULL)
+            goto fail3;
 
         __InitializeListHead(&Instance->ListEntry);
         Instance->Pipe = Pipe;
@@ -554,11 +557,8 @@ ServerThread(
                                         Instance,
                                         0,
                                         NULL);
-        if (Instance->Thread == INVALID_HANDLE_VALUE) {
-            free(Instance);
-            CloseHandle(Pipe);
-            break;
-        }
+        if (Instance->Thread == INVALID_HANDLE_VALUE)
+            goto fail4;
     }
 
     CloseHandle(Overlapped.hEvent);
@@ -566,6 +566,19 @@ ServerThread(
     Log("<====");
 
     return 0;
+
+fail4:
+    Log("fail4");
+
+    free(Instance);
+
+fail3:
+    Log("fail3");
+
+    CloseHandle(Pipe);
+
+fail2:
+    Log("fail2");
 
 fail1:
     Error = GetLastError();
