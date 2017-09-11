@@ -1122,6 +1122,8 @@ MonitorCtrlHandlerEx(
             break;
 
         case DBT_DEVICEQUERYREMOVE:
+        case DBT_DEVICEREMOVEPENDING:
+        case DBT_DEVICEREMOVECOMPLETE:
             if (Header->dbch_devicetype == DBT_DEVTYP_HANDLE) {
                 PDEV_BROADCAST_HANDLE Device = EventData;
 
