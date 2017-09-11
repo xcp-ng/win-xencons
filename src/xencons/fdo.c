@@ -902,6 +902,77 @@ fail1:
     return status;
 }
 
+static FORCEINLINE VOID
+__FdoDestroyHandle(
+    IN  PXENCONS_FDO    Fdo,
+    IN  PFDO_HANDLE     Handle
+    )
+{
+    UNREFERENCED_PARAMETER(Fdo);
+
+    Trace("%p\n", Handle->FileObject);
+
+    RtlZeroMemory(&Handle->ListEntry, sizeof (LIST_ENTRY));
+
+    StreamDestroy(Handle->Stream);
+    Handle->Stream = NULL;
+
+    Handle->FileObject = NULL;
+
+    ASSERT(IsZeroMemory(Handle, sizeof (FDO_HANDLE)));
+    __FdoFree(Handle);
+}
+
+static VOID
+FdoDestroyHandle(
+    IN  PXENCONS_FDO    Fdo,
+    IN  PFDO_HANDLE     Handle
+    )
+{
+    KIRQL               Irql;
+
+    KeAcquireSpinLock(&Fdo->HandleLock, &Irql);
+    RemoveEntryList(&Handle->ListEntry);
+    KeReleaseSpinLock(&Fdo->HandleLock, Irql);
+
+    __FdoDestroyHandle(Fdo, Handle);
+}
+
+static VOID
+FdoDestroyAllHandles(
+    IN  PXENCONS_FDO    Fdo
+    )
+{
+    KIRQL               Irql;
+    LIST_ENTRY          List;
+    PLIST_ENTRY         ListEntry;
+    PFDO_HANDLE         Handle;
+
+    InitializeListHead(&List);
+
+    KeAcquireSpinLock(&Fdo->HandleLock, &Irql);
+
+    ListEntry = Fdo->HandleList.Flink;
+    if (!IsListEmpty(&Fdo->HandleList)) {
+        RemoveEntryList(&Fdo->HandleList);
+        InitializeListHead(&Fdo->HandleList);
+        AppendTailList(&List, ListEntry);
+    }
+
+    KeReleaseSpinLock(&Fdo->HandleLock, Irql);
+
+    while (!IsListEmpty(&List)) {
+        ListEntry = RemoveHeadList(&List);
+        ASSERT3P(ListEntry, !=, &List);
+
+        Handle = CONTAINING_RECORD(ListEntry,
+                                   FDO_HANDLE,
+                                   ListEntry);
+
+        __FdoDestroyHandle(Fdo, Handle);
+    }
+}
+
 // This function must not touch pageable code or data
 static DECLSPEC_NOINLINE VOID
 FdoD0ToD3(
@@ -919,6 +990,8 @@ FdoD0ToD3(
 
 #pragma prefast(suppress:28123)
     (VOID) IoSetDeviceInterfaceState(&Dx->Link, FALSE);
+
+    FdoDestroyAllHandles(Fdo);
 
     PowerState.DeviceState = PowerDeviceD3;
     PoSetPowerState(Fdo->Dx->DeviceObject,
@@ -2173,31 +2246,6 @@ fail1:
     KeReleaseSpinLock(&Fdo->HandleLock, Irql);
 
     return NULL;
-}
-
-static VOID
-FdoDestroyHandle(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PFDO_HANDLE     Handle
-    )
-{
-    KIRQL               Irql;
-
-    KeAcquireSpinLock(&Fdo->HandleLock, &Irql);
-    RemoveEntryList(&Handle->ListEntry);
-    KeReleaseSpinLock(&Fdo->HandleLock, Irql);
-
-    RtlZeroMemory(&Handle->ListEntry, sizeof (LIST_ENTRY));
-
-    Trace("%p\n", Handle->FileObject);
-
-    StreamDestroy(Handle->Stream);
-    Handle->Stream = NULL;
-
-    Handle->FileObject = NULL;
-
-    ASSERT(IsZeroMemory(Handle, sizeof (FDO_HANDLE)));
-    __FdoFree(Handle);
 }
 
 static DECLSPEC_NOINLINE NTSTATUS
