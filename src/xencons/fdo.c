@@ -47,6 +47,8 @@
 #include "driver.h"
 #include "registry.h"
 #include "fdo.h"
+#include "pdo.h"
+#include "mutex.h"
 #include "console.h"
 #include "thread.h"
 #include "names.h"
@@ -84,6 +86,9 @@ struct _XENCONS_FDO {
     PIRP                        DevicePowerIrp;
 
     CHAR                        VendorName[MAXNAMELEN];
+
+    MUTEX                       Mutex;
+    ULONG                       References;
 
     FDO_RESOURCE                Resource[RESOURCE_COUNT];
 
@@ -208,6 +213,14 @@ __FdoGetPhysicalDeviceObject(
     )
 {
     return Fdo->PhysicalDeviceObject;
+}
+
+PDEVICE_OBJECT
+FdoGetPhysicalDeviceObject(
+    IN  PXENCONS_FDO    Fdo
+    )
+{
+    return __FdoGetPhysicalDeviceObject(Fdo);
 }
 
 __drv_requiresIRQL(PASSIVE_LEVEL)
@@ -358,6 +371,14 @@ __FdoGetVendorName(
     return Fdo->VendorName;
 }
 
+PCHAR
+FdoGetVendorName(
+    IN  PXENCONS_FDO    Fdo
+    )
+{
+    return __FdoGetVendorName(Fdo);
+}
+
 static FORCEINLINE VOID
 __FdoSetName(
     IN  PXENCONS_FDO    Fdo
@@ -381,6 +402,99 @@ __FdoGetName(
     PXENCONS_DX         Dx = Fdo->Dx;
 
     return Dx->Name;
+}
+
+PCHAR
+FdoGetName(
+    IN  PXENCONS_FDO    Fdo
+    )
+{
+    return __FdoGetName(Fdo);
+}
+
+__drv_functionClass(IO_COMPLETION_ROUTINE)
+__drv_sameIRQL
+static NTSTATUS
+__FdoDelegateIrp(
+    IN  PDEVICE_OBJECT  DeviceObject,
+    IN  PIRP            Irp,
+    IN  PVOID           Context
+    )
+{
+    PKEVENT             Event = Context;
+
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(Irp);
+
+    KeSetEvent(Event, IO_NO_INCREMENT, FALSE);
+
+    return STATUS_MORE_PROCESSING_REQUIRED;
+}
+
+NTSTATUS
+FdoDelegateIrp(
+    IN  PXENCONS_FDO    Fdo,
+    IN  PIRP            Irp
+    )
+{
+    PDEVICE_OBJECT      DeviceObject;
+    PIO_STACK_LOCATION  StackLocation;
+    PIRP                SubIrp;
+    KEVENT              Event;
+    PIO_STACK_LOCATION  SubStackLocation;
+    NTSTATUS            status;
+
+    ASSERT3U(KeGetCurrentIrql(), == , PASSIVE_LEVEL);
+
+    StackLocation = IoGetCurrentIrpStackLocation(Irp);
+
+    // Find the top of the FDO stack and hold a reference
+    DeviceObject = IoGetAttachedDeviceReference(Fdo->Dx->DeviceObject);
+
+    // Get a new IRP for the FDO stack
+    SubIrp = IoAllocateIrp(DeviceObject->StackSize, FALSE);
+
+    status = STATUS_NO_MEMORY;
+    if (SubIrp == NULL)
+        goto done;
+
+    // Copy in the information from the original IRP
+    SubStackLocation = IoGetNextIrpStackLocation(SubIrp);
+
+    KeInitializeEvent(&Event, NotificationEvent, FALSE);
+
+    RtlCopyMemory(SubStackLocation, StackLocation,
+                  FIELD_OFFSET(IO_STACK_LOCATION, CompletionRoutine));
+    SubStackLocation->Control = 0;
+
+    IoSetCompletionRoutine(SubIrp,
+                           __FdoDelegateIrp,
+                           &Event,
+                           TRUE,
+                           TRUE,
+                           TRUE);
+
+    // Default completion status
+    SubIrp->IoStatus.Status = Irp->IoStatus.Status;
+
+    status = IoCallDriver(DeviceObject, SubIrp);
+    if (status == STATUS_PENDING) {
+        (VOID)KeWaitForSingleObject(&Event,
+                                    Executive,
+                                    KernelMode,
+                                    FALSE,
+                                    NULL);
+        status = SubIrp->IoStatus.Status;
+    } else {
+        ASSERT3U(status, == , SubIrp->IoStatus.Status);
+    }
+
+    IoFreeIrp(SubIrp);
+
+done:
+    ObDereferenceObject(DeviceObject);
+
+    return status;
 }
 
 __drv_functionClass(IO_COMPLETION_ROUTINE)
@@ -485,6 +599,99 @@ FdoParseResources(
             break;
         }
     }
+}
+
+NTSTATUS
+FdoAddPhysicalDeviceObject(
+    IN  PXENCONS_FDO    Fdo,
+    IN  PXENCONS_PDO    Pdo
+    )
+{
+    PDEVICE_OBJECT      DeviceObject;
+    PXENCONS_DX         Dx;
+    NTSTATUS            status;
+
+    DeviceObject = PdoGetDeviceObject(Pdo);
+    Dx = (PXENCONS_DX)DeviceObject->DeviceExtension;
+    ASSERT3U(Dx->Type, == , PHYSICAL_DEVICE_OBJECT);
+
+    if (__FdoGetDevicePowerState(Fdo) == PowerDeviceD3)
+        goto done;
+
+    status = PdoResume(Pdo);
+    if (!NT_SUCCESS(status))
+        goto fail1;
+
+done:
+    InsertTailList(&Fdo->Dx->ListEntry, &Dx->ListEntry);
+    ASSERT3U(Fdo->References, != , 0);
+    Fdo->References++;
+
+    return STATUS_SUCCESS;
+
+fail1:
+    Error("fail1 (%08x)\n", status);
+
+    return status;
+}
+
+VOID
+FdoRemovePhysicalDeviceObject(
+    IN  PXENCONS_FDO    Fdo,
+    IN  PXENCONS_PDO    Pdo
+    )
+{
+    PDEVICE_OBJECT      DeviceObject;
+    PXENCONS_DX         Dx;
+
+    DeviceObject = PdoGetDeviceObject(Pdo);
+    Dx = (PXENCONS_DX)DeviceObject->DeviceExtension;
+    ASSERT3U(Dx->Type, == , PHYSICAL_DEVICE_OBJECT);
+
+    if (__FdoGetDevicePowerState(Fdo) == PowerDeviceD3)
+        goto done;
+
+    PdoSuspend(Pdo);
+
+done:
+    RemoveEntryList(&Dx->ListEntry);
+    ASSERT3U(Fdo->References, != , 0);
+    --Fdo->References;
+}
+
+static FORCEINLINE VOID
+__FdoAcquireMutex(
+    IN  PXENCONS_FDO    Fdo
+    )
+{
+    AcquireMutex(&Fdo->Mutex);
+}
+
+VOID
+FdoAcquireMutex(
+    IN  PXENCONS_FDO    Fdo
+    )
+{
+    __FdoAcquireMutex(Fdo);
+}
+
+static FORCEINLINE VOID
+__FdoReleaseMutex(
+    IN  PXENCONS_FDO    Fdo
+    )
+{
+    ReleaseMutex(&Fdo->Mutex);
+}
+
+VOID
+FdoReleaseMutex(
+    IN  PXENCONS_FDO    Fdo
+    )
+{
+    __FdoReleaseMutex(Fdo);
+
+    if (Fdo->References == 0)
+        FdoDestroy(Fdo);
 }
 
 static FORCEINLINE PANSI_STRING
@@ -831,9 +1038,9 @@ FdoD3ToD0(
     IN  PXENCONS_FDO    Fdo
     )
 {
-    PXENCONS_DX         Dx = Fdo->Dx;
     POWER_STATE         PowerState;
     KIRQL               Irql;
+    PLIST_ENTRY         ListEntry;
     NTSTATUS            status;
 
     ASSERT3U(KeGetCurrentIrql(), ==, PASSIVE_LEVEL);
@@ -873,11 +1080,27 @@ FdoD3ToD0(
                     DevicePowerState,
                     PowerState);
 
+    __FdoAcquireMutex(Fdo);
+
+    for (ListEntry = Fdo->Dx->ListEntry.Flink;
+         ListEntry != &Fdo->Dx->ListEntry;
+         ListEntry = ListEntry->Flink) {
+        PXENCONS_DX  Dx = CONTAINING_RECORD(ListEntry, XENCONS_DX, ListEntry);
+        PXENCONS_PDO Pdo = Dx->Pdo;
+
+        ASSERT3U(Dx->Type, == , PHYSICAL_DEVICE_OBJECT);
+
+        status = PdoResume(Pdo);
+        ASSERT(NT_SUCCESS(status));
+    }
+
+    __FdoReleaseMutex(Fdo);
+
     status = ConsoleD3ToD0(Fdo->Console);
     ASSERT(NT_SUCCESS(status));
 
 #pragma prefast(suppress:28123)
-    (VOID) IoSetDeviceInterfaceState(&Dx->Link, TRUE);
+    (VOID) IoSetDeviceInterfaceState(&Fdo->Dx->Link, TRUE);
 
     Trace("<====\n");
 
@@ -912,8 +1135,8 @@ FdoD0ToD3(
     IN  PXENCONS_FDO    Fdo
     )
 {
-    PXENCONS_DX         Dx = Fdo->Dx;
     POWER_STATE         PowerState;
+    PLIST_ENTRY         ListEntry;
     KIRQL               Irql;
 
     ASSERT3U(KeGetCurrentIrql(), ==, PASSIVE_LEVEL);
@@ -922,9 +1145,28 @@ FdoD0ToD3(
     Trace("====>\n");
 
 #pragma prefast(suppress:28123)
-    (VOID) IoSetDeviceInterfaceState(&Dx->Link, FALSE);
+    (VOID) IoSetDeviceInterfaceState(&Fdo->Dx->Link, FALSE);
 
     ConsoleD0ToD3(Fdo->Console);
+
+    __FdoAcquireMutex(Fdo);
+
+    for (ListEntry = Fdo->Dx->ListEntry.Flink;
+         ListEntry != &Fdo->Dx->ListEntry;
+         ListEntry = ListEntry->Flink) {
+        PXENCONS_DX  Dx = CONTAINING_RECORD(ListEntry, XENCONS_DX, ListEntry);
+        PXENCONS_PDO Pdo = Dx->Pdo;
+
+        ASSERT3U(Dx->Type, == , PHYSICAL_DEVICE_OBJECT);
+
+        if (PdoGetDevicePnpState(Pdo) == Deleted ||
+            PdoIsMissing(Pdo))
+            continue;
+
+        PdoSuspend(Pdo);
+    }
+
+    __FdoReleaseMutex(Fdo);
 
     PowerState.DeviceState = PowerDeviceD3;
     PoSetPowerState(Fdo->Dx->DeviceObject,
@@ -1117,9 +1359,26 @@ FdoSurpriseRemoval(
     IN  PIRP            Irp
     )
 {
+    PLIST_ENTRY         ListEntry;
     NTSTATUS            status;
 
     __FdoSetDevicePnpState(Fdo, SurpriseRemovePending);
+
+    __FdoAcquireMutex(Fdo);
+
+    for (ListEntry = Fdo->Dx->ListEntry.Flink;
+         ListEntry != &Fdo->Dx->ListEntry;
+         ListEntry = ListEntry->Flink) {
+        PXENCONS_DX  Dx = CONTAINING_RECORD(ListEntry, XENCONS_DX, ListEntry);
+        PXENCONS_PDO Pdo = Dx->Pdo;
+
+        ASSERT3U(Dx->Type, == , PHYSICAL_DEVICE_OBJECT);
+
+        if (!PdoIsMissing(Pdo))
+            PdoSetMissing(Pdo, "FDO surprise removed");
+    }
+
+    __FdoReleaseMutex(Fdo);
 
     Irp->IoStatus.Status = STATUS_SUCCESS;
 
@@ -1135,12 +1394,37 @@ FdoRemoveDevice(
     IN  PIRP            Irp
     )
 {
+    PLIST_ENTRY         ListEntry;
     NTSTATUS            status;
 
     ASSERT3U(KeGetCurrentIrql(), ==, PASSIVE_LEVEL);
 
     if (__FdoGetPreviousDevicePnpState(Fdo) != Started)
         goto done;
+
+    __FdoAcquireMutex(Fdo);
+
+    ListEntry = Fdo->Dx->ListEntry.Flink;
+    while (ListEntry != &Fdo->Dx->ListEntry) {
+        PLIST_ENTRY Flink = ListEntry->Flink;
+        PXENCONS_DX  Dx = CONTAINING_RECORD(ListEntry, XENCONS_DX, ListEntry);
+        PXENCONS_PDO Pdo = Dx->Pdo;
+
+        ASSERT3U(Dx->Type, == , PHYSICAL_DEVICE_OBJECT);
+
+        if (!PdoIsMissing(Pdo))
+            PdoSetMissing(Pdo, "FDO removed");
+
+        if (PdoGetDevicePnpState(Pdo) != SurpriseRemovePending)
+            PdoSetDevicePnpState(Pdo, Deleted);
+
+        if (PdoGetDevicePnpState(Pdo) == Deleted)
+            PdoDestroy(Pdo);
+
+        ListEntry = Flink;
+    }
+
+    __FdoReleaseMutex(Fdo);
 
     if (__FdoGetDevicePowerState(Fdo) == PowerDeviceD0)
         FdoD0ToD3(Fdo);
@@ -1157,7 +1441,13 @@ done:
     IoSkipCurrentIrpStackLocation(Irp);
     status = IoCallDriver(Fdo->LowerDeviceObject, Irp);
 
-    FdoDestroy(Fdo);
+    __FdoAcquireMutex(Fdo);
+    ASSERT3U(Fdo->References, != , 0);
+    --Fdo->References;
+    __FdoReleaseMutex(Fdo);
+
+    if (Fdo->References == 0)
+        FdoDestroy(Fdo);
 
     return status;
 }
@@ -1169,16 +1459,110 @@ FdoQueryDeviceRelations(
     )
 {
     PIO_STACK_LOCATION  StackLocation;
+    ULONG               Size;
+    PDEVICE_RELATIONS   Relations;
+    ULONG               Count;
+    PLIST_ENTRY         ListEntry;
     NTSTATUS            status;
 
-    ASSERT3U(KeGetCurrentIrql(), ==, PASSIVE_LEVEL);
+    ASSERT3U(KeGetCurrentIrql(), == , PASSIVE_LEVEL);
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
     status = Irp->IoStatus.Status;
 
-    IoSkipCurrentIrpStackLocation(Irp);
-    status = IoCallDriver(Fdo->LowerDeviceObject, Irp);
+    if (StackLocation->Parameters.QueryDeviceRelations.Type != BusRelations) {
+        IoSkipCurrentIrpStackLocation(Irp);
+        status = IoCallDriver(Fdo->LowerDeviceObject, Irp);
+
+        goto done;
+    }
+
+    __FdoAcquireMutex(Fdo);
+
+    Count = 0;
+    for (ListEntry = Fdo->Dx->ListEntry.Flink;
+         ListEntry != &Fdo->Dx->ListEntry;
+         ListEntry = ListEntry->Flink)
+        Count++;
+
+    Size = FIELD_OFFSET(DEVICE_RELATIONS, Objects) + (sizeof(PDEVICE_OBJECT) * __max(Count, 1));
+
+    Relations = ExAllocatePoolWithTag(PagedPool, Size, FDO_POOL);
+
+    status = STATUS_NO_MEMORY;
+    if (Relations == NULL)
+        goto fail1;
+
+    RtlZeroMemory(Relations, Size);
+
+    for (ListEntry = Fdo->Dx->ListEntry.Flink;
+         ListEntry != &Fdo->Dx->ListEntry;
+         ListEntry = ListEntry->Flink) {
+        PXENCONS_DX  Dx = CONTAINING_RECORD(ListEntry, XENCONS_DX, ListEntry);
+        PXENCONS_PDO Pdo = Dx->Pdo;
+
+        ASSERT3U(Dx->Type, == , PHYSICAL_DEVICE_OBJECT);
+
+        if (PdoIsMissing(Pdo))
+            continue;
+
+        if (PdoGetDevicePnpState(Pdo) == Present)
+            PdoSetDevicePnpState(Pdo, Enumerated);
+
+        ObReferenceObject(Dx->DeviceObject);
+        Relations->Objects[Relations->Count++] = Dx->DeviceObject;
+    }
+
+    ASSERT3U(Relations->Count, <= , Count);
+
+    Trace("%d PDO(s)\n", Relations->Count);
+
+    __FdoReleaseMutex(Fdo);
+
+    Irp->IoStatus.Information = (ULONG_PTR)Relations;
+    Irp->IoStatus.Status = STATUS_SUCCESS;
+
+    status = FdoForwardIrpSynchronously(Fdo, Irp);
+    if (!NT_SUCCESS(status))
+        goto fail2;
+
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    __FdoAcquireMutex(Fdo);
+
+    ListEntry = Fdo->Dx->ListEntry.Flink;
+    while (ListEntry != &Fdo->Dx->ListEntry) {
+        PXENCONS_DX  Dx = CONTAINING_RECORD(ListEntry, XENCONS_DX, ListEntry);
+        PXENCONS_PDO Pdo = Dx->Pdo;
+        PLIST_ENTRY Next = ListEntry->Flink;
+
+        ASSERT3U(Dx->Type, == , PHYSICAL_DEVICE_OBJECT);
+
+        if (PdoGetDevicePnpState(Pdo) == Deleted &&
+            PdoIsMissing(Pdo))
+            PdoDestroy(Pdo);
+
+        ListEntry = Next;
+    }
+
+    __FdoReleaseMutex(Fdo);
+
+done:
+    return status;
+
+fail2:
+    Error("fail2\n");
+
+    __FdoAcquireMutex(Fdo);
+
+fail1:
+    Error("fail1 (%08x)\n", status);
+
+    __FdoReleaseMutex(Fdo);
+
+    Irp->IoStatus.Status = status;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
     return status;
 }
@@ -2469,12 +2853,32 @@ FdoCreate(
 
     Dx->Fdo = Fdo;
 
+    InitializeMutex(&Fdo->Mutex);
+    InitializeListHead(&Dx->ListEntry);
+    Fdo->References = 1;
+
     Info("%p (%s)\n",
          FunctionDeviceObject,
          __FdoGetName(Fdo));
 
+    status = PdoCreate(Fdo, NULL);
+    if (!NT_SUCCESS(status))
+        goto fail13;
+
     FunctionDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
     return STATUS_SUCCESS;
+
+fail13:
+    Error("fail13\n");
+
+    Dx->Fdo = Fdo;
+
+    RtlZeroMemory(&Fdo->Mutex, sizeof(MUTEX));
+    RtlZeroMemory(&Dx->ListEntry, sizeof(LIST_ENTRY));
+    Fdo->References = 0;
+
+    ConsoleDestroy(Fdo->Console);
+    Fdo->Console = NULL;
 
 fail12:
     Error("fail12\n");
@@ -2561,13 +2965,17 @@ FdoDestroy(
     PXENCONS_DX         Dx = Fdo->Dx;
     PDEVICE_OBJECT      FunctionDeviceObject = Dx->DeviceObject;
 
-    ASSERT3U(__FdoGetDevicePnpState(Fdo), ==, Deleted);
+    ASSERT(IsListEmpty(&Dx->ListEntry));
+    ASSERT3U(Fdo->References, == , 0);
+    ASSERT3U(__FdoGetDevicePnpState(Fdo), == , Deleted);
 
     Fdo->NotDisableable = FALSE;
 
     Info("%p (%s)\n",
          FunctionDeviceObject,
          __FdoGetName(Fdo));
+
+    RtlZeroMemory(&Fdo->Mutex, sizeof(MUTEX));
 
     Dx->Fdo = NULL;
 

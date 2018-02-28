@@ -36,6 +36,7 @@
 
 #include "registry.h"
 #include "fdo.h"
+#include "pdo.h"
 #include "driver.h"
 #include "dbg_print.h"
 #include "assert.h"
@@ -206,6 +207,13 @@ Dispatch(
         PXENCONS_FDO Fdo = Dx->Fdo;
 
         status = FdoDispatch(Fdo, Irp);
+        break;
+    }
+    case PHYSICAL_DEVICE_OBJECT:
+    {
+        PXENCONS_PDO Pdo = Dx->Pdo;
+
+        status = PdoDispatch(Pdo, Irp);
         break;
     }
     default:

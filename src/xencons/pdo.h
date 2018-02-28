@@ -29,86 +29,85 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _XENCONS_FDO_H
-#define _XENCONS_FDO_H
+#ifndef _XENCONS_PDO_H
+#define _XENCONS_PDO_H
 
 #include <ntddk.h>
-#include <debug_interface.h>
-#include <suspend_interface.h>
-#include <store_interface.h>
-#include <console_interface.h>
 
 #include "driver.h"
 
-extern PCHAR
-FdoGetVendorName(
-    IN  PXENCONS_FDO    Fdo
+extern VOID
+PdoSetDevicePnpState(
+    IN  PXENCONS_PDO        Pdo,
+    IN  DEVICE_PNP_STATE    State
     );
 
-extern PCHAR
-FdoGetName(
-    IN  PXENCONS_FDO    Fdo
-    );
-
-extern NTSTATUS
-FdoAddPhysicalDeviceObject(
-    IN  PXENCONS_FDO    Fdo,
+extern DEVICE_PNP_STATE
+PdoGetDevicePnpState(
     IN  PXENCONS_PDO    Pdo
     );
 
 extern VOID
-FdoRemovePhysicalDeviceObject(
-    IN  PXENCONS_FDO     Fdo,
-    IN  PXENCONS_PDO     Pdo
+PdoSetMissing(
+    IN  PXENCONS_PDO    Pdo,
+    IN  const CHAR      *Reason
+    );
+
+extern BOOLEAN
+PdoIsMissing(
+    IN  PXENCONS_PDO    Pdo
     );
 
 extern VOID
-FdoAcquireMutex(
-    IN  PXENCONS_FDO     Fdo
+PdoRequestEject(
+    IN  PXENCONS_PDO    Pdo
     );
 
-extern VOID
-FdoReleaseMutex(
-    IN  PXENCONS_FDO     Fdo
+extern BOOLEAN
+PdoIsEjectRequested(
+    IN  PXENCONS_PDO    Pdo
+    );
+
+extern PCHAR
+PdoGetName(
+    IN  PXENCONS_PDO    Pdo
+    );
+
+extern PXENCONS_FDO
+PdoGetFdo(
+    IN  PXENCONS_PDO    Pdo
     );
 
 extern PDEVICE_OBJECT
-FdoGetPhysicalDeviceObject(
-    IN  PXENCONS_FDO    Fdo
+PdoGetDeviceObject(
+    IN  PXENCONS_PDO    Pdo
     );
 
 extern NTSTATUS
-FdoDelegateIrp(
+PdoCreate(
     IN  PXENCONS_FDO    Fdo,
-    IN  PIRP            Irp
+    IN  PANSI_STRING    Device
     );
 
 extern NTSTATUS
-FdoDispatch(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PIRP            Irp
-    );
-
-#define DECLARE_FDO_GET_INTERFACE(_Interface, _Type)    \
-extern VOID                                             \
-FdoGet ## _Interface ## Interface(                      \
-    IN  PXENCONS_FDO Fdo,                               \
-    OUT _Type        _Interface ## Interface            \
-    );
-
-DECLARE_FDO_GET_INTERFACE(Debug, PXENBUS_DEBUG_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Suspend, PXENBUS_SUSPEND_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Store, PXENBUS_STORE_INTERFACE)
-DECLARE_FDO_GET_INTERFACE(Console, PXENBUS_CONSOLE_INTERFACE)
-
-extern NTSTATUS
-FdoCreate(
-    IN  PDEVICE_OBJECT  PhysicalDeviceObject
+PdoResume(
+    IN  PXENCONS_PDO    Pdo
     );
 
 extern VOID
-FdoDestroy(
-    IN  PXENCONS_FDO    Fdo
+PdoSuspend(
+    IN  PXENCONS_PDO    Pdo
     );
 
-#endif  // _XENCONS_FDO_H
+extern VOID
+PdoDestroy(
+    IN  PXENCONS_PDO    Pdo
+    );
+
+extern NTSTATUS
+PdoDispatch(
+    IN  PXENCONS_PDO    Pdo,
+    IN  PIRP            Irp
+    );
+
+#endif  // _XENCONS_PDO_H

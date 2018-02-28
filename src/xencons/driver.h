@@ -50,11 +50,16 @@ DriverGetParametersKey(
     );
 
 typedef struct _XENCONS_FDO XENCONS_FDO, *PXENCONS_FDO;
+typedef struct _XENCONS_PDO XENCONS_PDO, *PXENCONS_PDO;
 
 #include "fdo.h"
+#include "pdo.h"
 
 #define MAX_DEVICE_ID_LEN   200
 #define MAX_GUID_STRING_LEN 39
+
+#pragma warning(push)
+#pragma warning(disable:4201) // nonstandard extension used : nameless struct/union
 
 typedef struct _XENCONS_DX {
     PDEVICE_OBJECT      DeviceObject;
@@ -72,7 +77,12 @@ typedef struct _XENCONS_DX {
 
     LIST_ENTRY          ListEntry;
 
-    PXENCONS_FDO        Fdo;
+    union {
+        PXENCONS_FDO    Fdo;
+        PXENCONS_PDO    Pdo;
+    };
 } XENCONS_DX, *PXENCONS_DX;
+
+#pragma warning(pop)
 
 #endif  // _XENCONS_DRIVER_H
