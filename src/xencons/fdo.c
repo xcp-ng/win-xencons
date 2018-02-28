@@ -47,7 +47,7 @@
 #include "driver.h"
 #include "registry.h"
 #include "fdo.h"
-#include "stream.h"
+#include "console.h"
 #include "thread.h"
 #include "names.h"
 #include "dbg_print.h"
@@ -69,12 +69,6 @@ typedef struct _FDO_RESOURCE {
     CM_PARTIAL_RESOURCE_DESCRIPTOR Translated;
 } FDO_RESOURCE, *PFDO_RESOURCE;
 
-typedef struct _FDO_HANDLE {
-    LIST_ENTRY      ListEntry;
-    PFILE_OBJECT    FileObject;
-    PXENCONS_STREAM Stream;
-} FDO_HANDLE, *PFDO_HANDLE;
-
 struct _XENCONS_FDO {
     PXENCONS_DX                 Dx;
     PDEVICE_OBJECT              LowerDeviceObject;
@@ -93,8 +87,7 @@ struct _XENCONS_FDO {
 
     FDO_RESOURCE                Resource[RESOURCE_COUNT];
 
-    LIST_ENTRY                  HandleList;
-    KSPIN_LOCK                  HandleLock;
+    PXENCONS_CONSOLE            Console;
 
     XENBUS_DEBUG_INTERFACE      DebugInterface;
     XENBUS_SUSPEND_INTERFACE    SuspendInterface;
@@ -788,7 +781,7 @@ fail1:
     return status;
 }
 
-static FORCEINLINE VOID
+static FORCEINLINE NTSTATUS
 __FdoD3ToD0(
     IN  PXENCONS_FDO    Fdo
     )
@@ -800,6 +793,8 @@ __FdoD3ToD0(
     (VOID) FdoSetDistribution(Fdo);
 
     Trace("<====\n");
+
+    return STATUS_SUCCESS;
 }
 
 static FORCEINLINE VOID
@@ -822,9 +817,12 @@ FdoSuspendCallbackLate(
     )
 {
     PXENCONS_FDO    Fdo = Argument;
+    NTSTATUS        status;
 
     __FdoD0ToD3(Fdo);
-    __FdoD3ToD0(Fdo);
+    
+    status = __FdoD3ToD0(Fdo);
+    ASSERT(NT_SUCCESS(status));
 }
 
 // This function must not touch pageable code or data
@@ -853,7 +851,9 @@ FdoD3ToD0(
     if (!NT_SUCCESS(status))
         goto fail2;
 
-    __FdoD3ToD0(Fdo);
+    status = __FdoD3ToD0(Fdo);
+    if (!NT_SUCCESS(status))
+        goto fail3;
 
     status = XENBUS_SUSPEND(Register,
                             &Fdo->SuspendInterface,
@@ -862,7 +862,7 @@ FdoD3ToD0(
                             Fdo,
                             &Fdo->SuspendCallbackLate);
     if (!NT_SUCCESS(status))
-        goto fail3;
+        goto fail4;
 
     KeLowerIrql(Irql);
 
@@ -873,6 +873,9 @@ FdoD3ToD0(
                     DevicePowerState,
                     PowerState);
 
+    status = ConsoleD3ToD0(Fdo->Console);
+    ASSERT(NT_SUCCESS(status));
+
 #pragma prefast(suppress:28123)
     (VOID) IoSetDeviceInterfaceState(&Dx->Link, TRUE);
 
@@ -880,10 +883,13 @@ FdoD3ToD0(
 
     return STATUS_SUCCESS;
 
-fail3:
+fail4:
     Error("fail4\n");
 
     __FdoD0ToD3(Fdo);
+
+fail3:
+    Error("fail3\n");
 
     XENBUS_STORE(Release, &Fdo->StoreInterface);
 
@@ -892,85 +898,12 @@ fail2:
 
     XENBUS_SUSPEND(Release, &Fdo->SuspendInterface);
 
-    __FdoD0ToD3(Fdo);
-
 fail1:
     Error("fail1 (%08x)\n", status);
 
     KeLowerIrql(Irql);
 
     return status;
-}
-
-static FORCEINLINE VOID
-__FdoDestroyHandle(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PFDO_HANDLE     Handle
-    )
-{
-    UNREFERENCED_PARAMETER(Fdo);
-
-    Trace("%p\n", Handle->FileObject);
-
-    RtlZeroMemory(&Handle->ListEntry, sizeof (LIST_ENTRY));
-
-    StreamDestroy(Handle->Stream);
-    Handle->Stream = NULL;
-
-    Handle->FileObject = NULL;
-
-    ASSERT(IsZeroMemory(Handle, sizeof (FDO_HANDLE)));
-    __FdoFree(Handle);
-}
-
-static VOID
-FdoDestroyHandle(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PFDO_HANDLE     Handle
-    )
-{
-    KIRQL               Irql;
-
-    KeAcquireSpinLock(&Fdo->HandleLock, &Irql);
-    RemoveEntryList(&Handle->ListEntry);
-    KeReleaseSpinLock(&Fdo->HandleLock, Irql);
-
-    __FdoDestroyHandle(Fdo, Handle);
-}
-
-static VOID
-FdoDestroyAllHandles(
-    IN  PXENCONS_FDO    Fdo
-    )
-{
-    KIRQL               Irql;
-    LIST_ENTRY          List;
-    PLIST_ENTRY         ListEntry;
-    PFDO_HANDLE         Handle;
-
-    InitializeListHead(&List);
-
-    KeAcquireSpinLock(&Fdo->HandleLock, &Irql);
-
-    ListEntry = Fdo->HandleList.Flink;
-    if (!IsListEmpty(&Fdo->HandleList)) {
-        RemoveEntryList(&Fdo->HandleList);
-        InitializeListHead(&Fdo->HandleList);
-        AppendTailList(&List, ListEntry);
-    }
-
-    KeReleaseSpinLock(&Fdo->HandleLock, Irql);
-
-    while (!IsListEmpty(&List)) {
-        ListEntry = RemoveHeadList(&List);
-        ASSERT3P(ListEntry, !=, &List);
-
-        Handle = CONTAINING_RECORD(ListEntry,
-                                   FDO_HANDLE,
-                                   ListEntry);
-
-        __FdoDestroyHandle(Fdo, Handle);
-    }
 }
 
 // This function must not touch pageable code or data
@@ -991,7 +924,7 @@ FdoD0ToD3(
 #pragma prefast(suppress:28123)
     (VOID) IoSetDeviceInterfaceState(&Dx->Link, FALSE);
 
-    FdoDestroyAllHandles(Fdo);
+    ConsoleD0ToD3(Fdo->Console);
 
     PowerState.DeviceState = PowerDeviceD3;
     PoSetPowerState(Fdo->Dx->DeviceObject,
@@ -2166,88 +2099,6 @@ done:
     return status;
 }
 
-static NTSTATUS
-FdoCreateHandle(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PFILE_OBJECT    FileObject
-    )
-{
-    PFDO_HANDLE         Handle;
-    KIRQL               Irql;
-    NTSTATUS            status;
-
-    Handle = __FdoAllocate(sizeof (FDO_HANDLE));
-
-    status = STATUS_NO_MEMORY;
-    if (Handle == NULL)
-        goto fail1;
-
-    status = StreamCreate(Fdo, &Handle->Stream);
-    if (!NT_SUCCESS(status))
-        goto fail2;
-
-    Handle->FileObject = FileObject;
-
-    KeAcquireSpinLock(&Fdo->HandleLock, &Irql);
-    InsertTailList(&Fdo->HandleList, &Handle->ListEntry);
-    KeReleaseSpinLock(&Fdo->HandleLock, Irql);
-
-    Trace("%p\n", Handle->FileObject);
-
-    return STATUS_SUCCESS;
-
-fail2:
-    Error("fail2\n");
-
-    ASSERT(IsZeroMemory(Handle, sizeof (FDO_HANDLE)));
-    __FdoFree(Handle);
-
-fail1:
-    Error("fail1 (%08x)\n", status);
-
-    return status;
-}
-
-static PFDO_HANDLE
-FdoFindHandle(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PFILE_OBJECT    FileObject
-    )
-{
-    KIRQL               Irql;
-    PLIST_ENTRY         ListEntry;
-    PFDO_HANDLE         Handle;
-    NTSTATUS            status;
-
-    KeAcquireSpinLock(&Fdo->HandleLock, &Irql);
-
-    for (ListEntry = Fdo->HandleList.Flink;
-         ListEntry != &Fdo->HandleList;
-         ListEntry = ListEntry->Flink) {
-        Handle = CONTAINING_RECORD(ListEntry,
-                                   FDO_HANDLE,
-                                   ListEntry);
-
-        if (Handle->FileObject == FileObject)
-            goto found;
-    }
-
-    status = STATUS_UNSUCCESSFUL;
-    goto fail1;
-
-found:
-    KeReleaseSpinLock(&Fdo->HandleLock, Irql);
-
-    return Handle;
-
-fail1:
-    Error("fail1 (%08x)\n", status);
-
-    KeReleaseSpinLock(&Fdo->HandleLock, Irql);
-
-    return NULL;
-}
-
 static DECLSPEC_NOINLINE NTSTATUS
 FdoDispatchCreate(
     IN  PXENCONS_FDO    Fdo,
@@ -2259,7 +2110,7 @@ FdoDispatchCreate(
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
-    status = FdoCreateHandle(Fdo, StackLocation->FileObject);
+    status = ConsoleOpen(Fdo->Console, StackLocation->FileObject);
 
     Irp->IoStatus.Status = status;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -2274,27 +2125,11 @@ FdoDispatchCleanup(
     )
 {
     PIO_STACK_LOCATION  StackLocation;
-    PFDO_HANDLE         Handle;
     NTSTATUS            status;
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
-    Handle = FdoFindHandle(Fdo, StackLocation->FileObject);
-
-    status = STATUS_UNSUCCESSFUL;
-    if (Handle == NULL)
-        goto fail1;
-
-    FdoDestroyHandle(Fdo, Handle);
-    status = STATUS_SUCCESS;
-
-    Irp->IoStatus.Status = status;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-
-    return status;
-
-fail1:
-    Error("fail1 (%08x)\n", status);
+    status = ConsoleClose(Fdo->Console, StackLocation->FileObject);
 
     Irp->IoStatus.Status = status;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -2326,28 +2161,13 @@ FdoDispatchReadWrite(
     IN  PIRP            Irp
     )
 {
-    PIO_STACK_LOCATION  StackLocation;
-    PFDO_HANDLE         Handle;
     NTSTATUS            status;
 
-    StackLocation = IoGetCurrentIrpStackLocation(Irp);
-
-    Handle = FdoFindHandle(Fdo, StackLocation->FileObject);
-
-    status = STATUS_UNSUCCESSFUL;
-    if (Handle == NULL)
+    status = ConsolePutQueue(Fdo->Console, Irp);
+    if (status != STATUS_PENDING)
         goto fail1;
 
-    IoMarkIrpPending(Irp);
-
-    status = StreamPutQueue(Handle->Stream, Irp);
-    if (!NT_SUCCESS(status))
-        goto fail2;
-
     return STATUS_PENDING;
-
-fail2:
-    Error("fail2\n");
 
 fail1:
     Error("fail1 (%08x)\n", status);
@@ -2641,8 +2461,9 @@ FdoCreate(
     if (!NT_SUCCESS(status))
         goto fail11;
 
-    InitializeListHead(&Fdo->HandleList);
-    KeInitializeSpinLock(&Fdo->HandleLock);
+    status = ConsoleCreate(Fdo, &Fdo->Console);
+    if (!NT_SUCCESS(status))
+        goto fail12;
 
     FunctionDeviceObject->Flags |= DO_BUFFERED_IO;
 
@@ -2655,11 +2476,17 @@ FdoCreate(
     FunctionDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
     return STATUS_SUCCESS;
 
+fail12:
+    Error("fail12\n");
+
+    RtlZeroMemory(&Fdo->ConsoleInterface,
+                  sizeof(XENBUS_CONSOLE_INTERFACE));
+
 fail11:
     Error("fail11\n");
 
-    RtlZeroMemory(&Fdo->ConsoleInterface,
-                  sizeof (XENBUS_CONSOLE_INTERFACE));
+    RtlZeroMemory(&Fdo->StoreInterface,
+                  sizeof (XENBUS_STORE_INTERFACE));
 
 fail10:
     Error("fail10\n");
@@ -2744,10 +2571,8 @@ FdoDestroy(
 
     Dx->Fdo = NULL;
 
-    RtlZeroMemory(&Fdo->HandleLock, sizeof (KSPIN_LOCK));
-
-    ASSERT(IsListEmpty(&Fdo->HandleList));
-    RtlZeroMemory(&Fdo->HandleList, sizeof (LIST_ENTRY));
+    ConsoleDestroy(Fdo->Console);
+    Fdo->Console = NULL;
 
     RtlZeroMemory(&Fdo->ConsoleInterface,
                   sizeof (XENBUS_CONSOLE_INTERFACE));
