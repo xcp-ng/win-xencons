@@ -35,46 +35,23 @@
 #include <ntddk.h>
 
 #include "driver.h"
-
-typedef struct _XENCONS_CONSOLE XENCONS_CONSOLE, *PXENCONS_CONSOLE;
+#include "console_abi.h"
 
 extern NTSTATUS
 ConsoleCreate(
-    IN  PXENCONS_FDO        Fdo,
-    OUT PXENCONS_CONSOLE    *Console
+    IN  PXENCONS_FDO                    Fdo,
+    OUT PXENCONS_CONSOLE_ABI_CONTEXT    *Context
     );
 
-extern VOID
+VOID
+ConsoleGetAbi(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
+    OUT PXENCONS_CONSOLE_ABI            Abi
+    );
+
+VOID
 ConsoleDestroy(
-    IN  PXENCONS_CONSOLE    Console
-    );
-
-extern NTSTATUS
-ConsoleD3ToD0(
-    IN  PXENCONS_CONSOLE    Console
-    ); 
-
-extern VOID
-ConsoleD0ToD3(
-    IN  PXENCONS_CONSOLE    Console
-    );
-
-extern NTSTATUS
-ConsoleOpen(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PFILE_OBJECT        FileObject
-    );
-
-extern NTSTATUS
-ConsoleClose(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PFILE_OBJECT        FileObject
-    );
-
-extern NTSTATUS
-ConsolePutQueue(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PIRP                Irp
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
     );
 
 #endif  // _XENCONS_CONSOLE_H

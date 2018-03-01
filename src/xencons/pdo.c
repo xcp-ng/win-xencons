@@ -1,33 +1,33 @@
 /* Copyright (c) Citrix Systems Inc.
-* All rights reserved.
-*
-* Redistribution and use in source and binary forms,
-* with or without modification, are permitted provided
-* that the following conditions are met:
-*
-* *   Redistributions of source code must retain the above
-*     copyright notice, this list of conditions and the
-*     following disclaimer.
-* *   Redistributions in binary form must reproduce the above
-*     copyright notice, this list of conditions and the
-*     following disclaimer in the documentation and/or other
-*     materials provided with the distribution.
-*
-* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
-* CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
-* INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-* MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-* DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
-* CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-* SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-* BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-* SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-* INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-* WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
-* SUCH DAMAGE.
-*/
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms,
+ * with or without modification, are permitted provided
+ * that the following conditions are met:
+ *
+ * *   Redistributions of source code must retain the above
+ *     copyright notice, this list of conditions and the
+ *     following disclaimer.
+ * *   Redistributions in binary form must reproduce the above
+ *     copyright notice, this list of conditions and the
+ *     following disclaimer in the documentation and/or other
+ *     materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+ * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
 
 #define INITGUID 1
 
@@ -44,6 +44,7 @@
 #include "names.h"
 #include "fdo.h"
 #include "pdo.h"
+#include "console_abi.h"
 #include "console.h"
 #include "thread.h"
 #include "dbg_print.h"
@@ -56,23 +57,24 @@
 #define MAXTEXTLEN  1024
 
 struct _XENCONS_PDO {
-    PXENCONS_DX                 Dx;
+    PXENCONS_DX                     Dx;
 
-    PXENCONS_THREAD             SystemPowerThread;
-    PIRP                        SystemPowerIrp;
-    PXENCONS_THREAD             DevicePowerThread;
-    PIRP                        DevicePowerIrp;
+    PXENCONS_THREAD                 SystemPowerThread;
+    PIRP                            SystemPowerIrp;
+    PXENCONS_THREAD                 DevicePowerThread;
+    PIRP                            DevicePowerIrp;
 
-    PXENCONS_FDO                Fdo;
-    BOOLEAN                     Missing;
-    const CHAR                  *Reason;
-    LONG                        Eject;
+    PXENCONS_FDO                    Fdo;
+    BOOLEAN                         Missing;
+    const CHAR                      *Reason;
+    LONG                   		    Eject;
 
-    XENBUS_SUSPEND_INTERFACE    SuspendInterface;
-    PXENBUS_SUSPEND_CALLBACK    SuspendCallbackLate;
+    XENBUS_SUSPEND_INTERFACE    	SuspendInterface;
+    PXENBUS_SUSPEND_CALLBACK        SuspendCallbackLate;
 
-    BOOLEAN                     IsDefault;
-    PXENCONS_CONSOLE            Console;
+    BOOLEAN                     	IsDefault;
+    PXENCONS_CONSOLE_ABI_CONTEXT    Context;
+    XENCONS_CONSOLE_ABI         	Abi;
 };
 
 static FORCEINLINE PVOID
@@ -328,7 +330,6 @@ __PdoSetDefault(
     Pdo->IsDefault = (Device == NULL) ? TRUE : FALSE;
 }
 
-
 static FORCEINLINE BOOLEAN
 __PdoSetEjectRequested(
     IN  PXENCONS_PDO    Pdo
@@ -476,11 +477,8 @@ PdoD3ToD0(
 
     KeLowerIrql(Irql);
 
-    if (__PdoIsDefault(Pdo))
-        status = ConsoleD3ToD0(Pdo->Console);
-    else
-        status = STATUS_SUCCESS;
-
+    ASSERT(__PdoIsDefault(Pdo));
+    status = XENCONS_CONSOLE_ABI(D3ToD0, &Pdo->Abi);
     if (!NT_SUCCESS(status))
         goto fail4;
 
@@ -534,8 +532,8 @@ PdoD0ToD3(
 #pragma prefast(suppress:28123)
     (VOID) IoSetDeviceInterfaceState(&Pdo->Dx->Link, FALSE);
 
-    if (__PdoIsDefault(Pdo))
-        ConsoleD0ToD3(Pdo->Console);
+    ASSERT(__PdoIsDefault(Pdo));
+    XENCONS_CONSOLE_ABI(D0ToD3, &Pdo->Abi);
 
     KeRaiseIrql(DISPATCH_LEVEL, &Irql);
 
@@ -1729,10 +1727,10 @@ PdoDispatchCreate(
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
-    if (__PdoIsDefault(Pdo))
-        status = ConsoleOpen(Pdo->Console, StackLocation->FileObject);
-    else
-        status = STATUS_SUCCESS;
+    ASSERT(__PdoIsDefault(Pdo));
+    status = XENCONS_CONSOLE_ABI(Open,
+                                 &Pdo->Abi,
+                                 StackLocation->FileObject);
 
     Irp->IoStatus.Status = status;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -1751,10 +1749,10 @@ PdoDispatchCleanup(
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
-    if (__PdoIsDefault(Pdo))
-        status = ConsoleClose(Pdo->Console, StackLocation->FileObject);
-    else
-        status = STATUS_SUCCESS;
+    ASSERT(__PdoIsDefault(Pdo));
+    status = XENCONS_CONSOLE_ABI(Close,
+                                 &Pdo->Abi,
+                                 StackLocation->FileObject);
 
     Irp->IoStatus.Status = status;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -1788,11 +1786,10 @@ PdoDispatchReadWriteControl(
 {
     NTSTATUS            status;
 
-    if (__PdoIsDefault(Pdo))
-        status = ConsolePutQueue(Pdo->Console, Irp);
-    else
-        status = STATUS_DEVICE_NOT_READY;
-
+    ASSERT(__PdoIsDefault(Pdo));
+    status = XENCONS_CONSOLE_ABI(PutQueue,
+                                 &Pdo->Abi,
+                                 Irp);
     if (status == STATUS_PENDING) {
         IoMarkIrpPending(Irp);
         goto done;
@@ -1872,9 +1869,22 @@ PdoResume(
     IN  PXENCONS_PDO    Pdo
     )
 {
+    NTSTATUS            status;
+
     Trace("(%s) ====>\n", __PdoGetName(Pdo));
+
+    ASSERT(__PdoIsDefault(Pdo));
+    status = XENCONS_CONSOLE_ABI(Acquire, &Pdo->Abi);
+    if (!NT_SUCCESS(status))
+        goto fail1;
+
     Trace("(%s) <====\n", __PdoGetName(Pdo));
     return STATUS_SUCCESS;
+
+fail1:
+    Error("fail1 (%08x)\n", status);
+
+    return status;
 }
 
 VOID
@@ -1883,6 +1893,10 @@ PdoSuspend(
     )
 {
     Trace("(%s) ====>\n", __PdoGetName(Pdo));
+
+    ASSERT(__PdoIsDefault(Pdo));
+    XENCONS_CONSOLE_ABI(Release, &Pdo->Abi);
+
     Trace("(%s) <====\n", __PdoGetName(Pdo));
 }
 
@@ -1942,13 +1956,14 @@ PdoCreate(
 
     __PdoSetDefault(Pdo, Device);
 
-    if (__PdoIsDefault(Pdo))
-        status = ConsoleCreate(Fdo, &Pdo->Console);
-    else
-        status = STATUS_SUCCESS;
-
+    status = __PdoIsDefault(Pdo) ?
+               ConsoleCreate(Fdo, &Pdo->Context) :
+               STATUS_NOT_SUPPORTED;
     if (!NT_SUCCESS(status))
         goto fail5;
+
+    if (__PdoIsDefault(Pdo))
+      ConsoleGetAbi(Pdo->Context, &Pdo->Abi);
 
     status = FdoAddPhysicalDeviceObject(Fdo, Pdo);
     if (!NT_SUCCESS(status))
@@ -1976,10 +1991,10 @@ fail6:
 
     (VOID)__PdoClearEjectRequested(Pdo);
 
-    if (__PdoIsDefault(Pdo))
-        ConsoleDestroy(Pdo->Console);
-
-    Pdo->Console = NULL;
+    if (__PdoIsDefault(Pdo)) {
+        RtlZeroMemory(&Pdo->Abi, sizeof(XENCONS_CONSOLE_ABI));
+        ConsoleDestroy(Pdo->Context);
+    }
 
     Pdo->IsDefault = FALSE;
 
@@ -2049,10 +2064,10 @@ PdoDestroy(
 
     Dx->Pdo = NULL;
 
-    if (__PdoIsDefault(Pdo))
-        ConsoleDestroy(Pdo->Console);
-
-    Pdo->Console = NULL;
+    if (__PdoIsDefault(Pdo)) {
+        RtlZeroMemory(&Pdo->Abi, sizeof(XENCONS_CONSOLE_ABI));
+        ConsoleDestroy(Pdo->Context);
+    }
 
     Pdo->IsDefault = FALSE;
 

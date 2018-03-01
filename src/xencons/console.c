@@ -53,11 +53,12 @@ typedef struct _CONSOLE_HANDLE {
     PXENCONS_STREAM Stream;
 } CONSOLE_HANDLE, *PCONSOLE_HANDLE;
 
-struct _XENCONS_CONSOLE {
+typedef struct _XENCONS_CONSOLE {
+    LONG            References;
     PXENCONS_FDO    Fdo;
     LIST_ENTRY      List;
     KSPIN_LOCK      Lock;
-};
+} XENCONS_CONSOLE, *PXENCONS_CONSOLE;
 
 static FORCEINLINE PVOID
 __ConsoleAllocate(
@@ -169,7 +170,7 @@ fail1:
     return NULL;
 }
 
-NTSTATUS
+static NTSTATUS
 ConsoleOpen(
     IN  PXENCONS_CONSOLE    Console,
     IN  PFILE_OBJECT        FileObject
@@ -197,7 +198,7 @@ fail1:
     return status;
 }
 
-NTSTATUS
+static NTSTATUS
 ConsoleClose(
     IN  PXENCONS_CONSOLE    Console,
     IN  PFILE_OBJECT        FileObject
@@ -338,7 +339,7 @@ fail1:
     return status;
 }
 
-NTSTATUS
+static NTSTATUS
 ConsolePutQueue(
     IN  PXENCONS_CONSOLE    Console,
     IN  PIRP                Irp
@@ -368,7 +369,7 @@ ConsolePutQueue(
     return status;
 }
 
-NTSTATUS
+static NTSTATUS
 ConsoleD3ToD0(
     IN  PXENCONS_CONSOLE    Console
     )
@@ -382,7 +383,7 @@ ConsoleD3ToD0(
     return STATUS_SUCCESS;
 }
 
-VOID
+static VOID
 ConsoleD0ToD3(
     IN  PXENCONS_CONSOLE    Console
     )
@@ -421,25 +422,134 @@ ConsoleD0ToD3(
     Trace("<====\n");
 }
 
-NTSTATUS
-ConsoleCreate(
-    IN  PXENCONS_FDO        Fdo,
-    OUT PXENCONS_CONSOLE    *Console
+static NTSTATUS
+ConsoleAbiAcquire(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
     )
 {
-    NTSTATUS                status;
+    PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
+    KIRQL                               Irql;
 
     Trace("====>\n");
 
-    *Console = __ConsoleAllocate(sizeof(XENCONS_CONSOLE));
+    KeAcquireSpinLock(&Console->Lock, &Irql);
+
+    Console->References++;
+
+    KeReleaseSpinLock(&Console->Lock, Irql);
+
+    Trace("<====\n");
+
+    return STATUS_SUCCESS;
+}
+
+static VOID
+ConsoleAbiRelease(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    )
+{
+    PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
+    KIRQL                               Irql;
+
+    Trace("====>\n");
+
+    KeAcquireSpinLock(&Console->Lock, &Irql);
+
+    ASSERT(Console->References != 0);
+    --Console->References;
+
+    KeReleaseSpinLock(&Console->Lock, Irql);
+
+    Trace("<====\n");
+}
+
+static NTSTATUS
+ConsoleAbiD3ToD0(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    )
+{
+    PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
+
+    return ConsoleD3ToD0(Console);
+}
+
+static VOID
+ConsoleAbiD0ToD3(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    )
+{
+    PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
+
+    ConsoleD0ToD3(Console);
+}
+
+static NTSTATUS
+ConsoleAbiOpen(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
+    IN  PFILE_OBJECT                    FileObject
+    )
+{
+    PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
+
+    return ConsoleOpen(Console, FileObject);
+}
+
+static NTSTATUS
+ConsoleAbiClose(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
+    IN  PFILE_OBJECT                    FileObject
+    )
+{
+    PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
+
+    return ConsoleClose(Console, FileObject);
+}
+
+static NTSTATUS
+ConsoleAbiPutQueue(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
+    IN  PIRP                            Irp
+    )
+{
+    PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
+
+    return ConsolePutQueue(Console, Irp);
+}
+
+static XENCONS_CONSOLE_ABI ConsoleAbi = {
+    NULL,
+    ConsoleAbiAcquire,
+    ConsoleAbiRelease,
+    ConsoleAbiD3ToD0,
+    ConsoleAbiD0ToD3,
+    ConsoleAbiOpen,
+    ConsoleAbiClose,
+    ConsoleAbiPutQueue
+};
+
+NTSTATUS
+ConsoleCreate(
+    IN  PXENCONS_FDO                    Fdo,
+    OUT PXENCONS_CONSOLE_ABI_CONTEXT    *Context
+    )
+{
+    PXENCONS_CONSOLE                    Console;
+    NTSTATUS                            status;
+
+    Trace("====>\n");
+
+    Console = __ConsoleAllocate(sizeof(XENCONS_CONSOLE));
 
     status = STATUS_NO_MEMORY;
-    if (*Console == NULL)
+    if (Console == NULL)
         goto fail1;
 
-    (*Console)->Fdo = Fdo;
-    InitializeListHead(&(*Console)->List);
-    KeInitializeSpinLock(&(*Console)->Lock);
+    InitializeListHead(&Console->List);
+    KeInitializeSpinLock(&Console->Lock);
+
+    Console->Fdo = Fdo;
+
+    *Context = (PVOID)Console;
 
     Trace("<====\n");
 
@@ -452,10 +562,23 @@ fail1:
 }
 
 VOID
-ConsoleDestroy(
-    IN  PXENCONS_CONSOLE    Console
+ConsoleGetAbi(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
+    OUT PXENCONS_CONSOLE_ABI            Abi
     )
 {
+    *Abi = ConsoleAbi;
+
+    Abi->Context = Context;
+}
+
+VOID
+ConsoleDestroy(
+    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    )
+{
+    PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
+    
     Trace("====>\n");
 
     ASSERT(IsListEmpty(&Console->List));
