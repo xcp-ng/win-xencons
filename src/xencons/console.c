@@ -36,6 +36,8 @@
 #include <ntstrsafe.h>
 #include <stdlib.h>
 
+#include <xencons_device.h>
+
 #include "driver.h"
 #include "console.h"
 #include "stream.h"
@@ -227,8 +229,8 @@ fail1:
     return status;
 }
 
-NTSTATUS
-ConsolePutQueue(
+static FORCEINLINE NTSTATUS
+__ConsoleReadWrite(
     IN  PXENCONS_CONSOLE    Console,
     IN  PIRP                Irp
     )
@@ -256,6 +258,112 @@ fail2:
 
 fail1:
     Error("fail1 (%08x)\n", status);
+
+    return status;
+}
+
+static FORCEINLINE NTSTATUS
+__ConsoleDeviceControl(
+    IN  PXENCONS_CONSOLE    Console,
+    IN  PIRP                Irp
+    )
+{
+    PIO_STACK_LOCATION      StackLocation;
+    ULONG                   IoControlCode;
+    ULONG                   InputBufferLength;
+    ULONG                   OutputBufferLength;
+    PVOID                   Buffer;
+    PCHAR                   Value;
+    ULONG                   Length;
+    NTSTATUS                status;
+
+    UNREFERENCED_PARAMETER(Console);
+
+    StackLocation = IoGetCurrentIrpStackLocation(Irp);
+    IoControlCode = StackLocation->Parameters.DeviceIoControl.IoControlCode;
+    InputBufferLength = StackLocation->Parameters.DeviceIoControl.InputBufferLength;
+    OutputBufferLength = StackLocation->Parameters.DeviceIoControl.OutputBufferLength;
+    Buffer = Irp->AssociatedIrp.SystemBuffer;
+
+    switch (IoControlCode) {
+    case IOCTL_XENCONS_GET_INSTANCE:
+        Value = "0";
+        break;
+    case IOCTL_XENCONS_GET_NAME:
+        Value = "default";
+        break;
+    case IOCTL_XENCONS_GET_PROTOCOL:
+        Value = "vt100";
+        break;
+    default:
+        Value = NULL;
+        break;
+    }
+
+    status = STATUS_NOT_SUPPORTED;
+    if (Value == NULL)
+        goto fail1;
+
+    status = STATUS_INVALID_PARAMETER;
+    if (InputBufferLength != 0)
+        goto fail2;
+
+    Length = (ULONG)strlen(Value) + 1;
+    Irp->IoStatus.Information = Length;
+
+    status = STATUS_INVALID_BUFFER_SIZE;
+    if (OutputBufferLength == 0)
+        goto fail3;
+
+    RtlZeroMemory(Buffer, OutputBufferLength);
+    if (OutputBufferLength < Length)
+        goto fail4;
+
+    RtlCopyMemory(Buffer, Value, Length);
+
+    return STATUS_SUCCESS;
+
+fail4:
+    Error("fail4\n");
+
+fail3:
+    Error("fail3\n");
+
+fail2:
+    Error("fail2\n");
+
+fail1:
+    Error("fail1 (%08x)\n", status);
+
+    return status;
+}
+
+NTSTATUS
+ConsolePutQueue(
+    IN  PXENCONS_CONSOLE    Console,
+    IN  PIRP                Irp
+    )
+{
+    PIO_STACK_LOCATION      StackLocation;
+    NTSTATUS                status;
+
+    StackLocation = IoGetCurrentIrpStackLocation(Irp);
+
+    switch (StackLocation->MajorFunction) {
+    case IRP_MJ_READ:
+    case IRP_MJ_WRITE:
+        status = __ConsoleReadWrite(Console, Irp);
+        break;
+
+    case IRP_MJ_DEVICE_CONTROL:
+        status = __ConsoleDeviceControl(Console, Irp);
+        break;
+
+    default:
+        ASSERT(FALSE);
+        status = STATUS_NOT_SUPPORTED;
+        break;
+    }
 
     return status;
 }

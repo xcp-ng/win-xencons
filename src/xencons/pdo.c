@@ -1735,7 +1735,7 @@ PdoDispatchClose(
 }
 
 static DECLSPEC_NOINLINE NTSTATUS
-PdoDispatchReadWrite(
+PdoDispatchReadWriteControl(
     IN  PXENCONS_PDO    Pdo,
     IN  PIRP            Irp
     )
@@ -1743,17 +1743,16 @@ PdoDispatchReadWrite(
     NTSTATUS            status;
 
     status = ConsolePutQueue(Pdo->Console, Irp);
-    if (status != STATUS_PENDING)
-        goto fail1;
 
-    return STATUS_PENDING;
-
-fail1:
-    Error("fail1 (%08x)\n", status);
+    if (status == STATUS_PENDING) {
+        IoMarkIrpPending(Irp);
+        goto done;
+    }
 
     Irp->IoStatus.Status = status;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
+done:
     return status;
 }
 
@@ -1807,7 +1806,8 @@ PdoDispatch(
 
     case IRP_MJ_READ:
     case IRP_MJ_WRITE:
-        status = PdoDispatchReadWrite(Pdo, Irp);
+    case IRP_MJ_DEVICE_CONTROL:
+        status = PdoDispatchReadWriteControl(Pdo, Irp);
         break;
 
     default:

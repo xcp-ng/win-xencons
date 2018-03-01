@@ -36,4 +36,21 @@
 DEFINE_GUID(GUID_XENCONS_DEVICE,
             0xd3edd21, 0x8ef9, 0x4dff, 0x85, 0x6c, 0x8c, 0x68, 0xbf, 0x4f, 0xdc, 0xa3);
 
+#define __IOCTL_XENCONS_BEGIN   0x800
+
+#define IOCTL_XENCONS_GET_INSTANCE  CTL_CODE(FILE_DEVICE_UNKNOWN,       \
+                                             __IOCTL_XENCONS_BEGIN + 0, \
+                                             METHOD_BUFFERED,           \
+                                             FILE_ANY_ACCESS)
+
+#define IOCTL_XENCONS_GET_NAME      CTL_CODE(FILE_DEVICE_UNKNOWN,       \
+                                             __IOCTL_XENCONS_BEGIN + 1, \
+                                             METHOD_BUFFERED,           \
+                                             FILE_ANY_ACCESS)
+
+#define IOCTL_XENCONS_GET_PROTOCOL  CTL_CODE(FILE_DEVICE_UNKNOWN,       \
+                                             __IOCTL_XENCONS_BEGIN + 2, \
+                                             METHOD_BUFFERED,           \
+                                             FILE_ANY_ACCESS)
+
 #endif  // _XENCONS_DEVICE_H
