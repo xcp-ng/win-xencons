@@ -85,6 +85,9 @@ struct _XENCONS_FDO {
 
     CHAR                        VendorName[MAXNAMELEN];
 
+    PXENCONS_THREAD             ScanThread;
+    KEVENT                      ScanEvent;
+    PXENBUS_STORE_WATCH         ScanWatch;
     MUTEX                       Mutex;
     ULONG                       References;
 
@@ -653,6 +656,9 @@ done:
     RemoveEntryList(&Dx->ListEntry);
     ASSERT3U(Fdo->References, != , 0);
     --Fdo->References;
+
+    if (Fdo->ScanThread)
+        ThreadWake(Fdo->ScanThread);
 }
 
 static FORCEINLINE VOID
@@ -688,6 +694,114 @@ FdoReleaseMutex(
 
     if (Fdo->References == 0)
         FdoDestroy(Fdo);
+}
+
+static FORCEINLINE BOOLEAN
+__FdoEnumerate(
+    IN  PXENCONS_FDO    Fdo,
+    IN  PANSI_STRING    Devices
+    )
+{
+    BOOLEAN             NeedInvalidate;
+    HANDLE              ParametersKey;
+    ULONG               Enumerate;
+    PLIST_ENTRY         ListEntry;
+    ULONG               Index;
+    NTSTATUS            status;
+
+    Trace("====>\n");
+
+    NeedInvalidate = FALSE;
+
+    ParametersKey = DriverGetParametersKey();
+
+    status = RegistryQueryDwordValue(ParametersKey,
+                                     "Enumerate",
+                                     &Enumerate);
+    if (!NT_SUCCESS(status))
+        Enumerate = 1;
+
+    if (Enumerate == 0)
+        goto done;
+
+    __FdoAcquireMutex(Fdo);
+
+    ListEntry = Fdo->Dx->ListEntry.Flink;
+    while (ListEntry != &Fdo->Dx->ListEntry) {
+        PLIST_ENTRY     Next = ListEntry->Flink;
+        PXENCONS_DX     Dx = CONTAINING_RECORD(ListEntry, XENCONS_DX, ListEntry);
+        PXENCONS_PDO    Pdo = Dx->Pdo;
+
+        // If the PDO is the default console, it wont exist in the
+        // the device list, as its statically created
+        if (PdoIsDefault(Pdo)) {
+            ListEntry = Next;
+            continue;
+        }
+
+        if (PdoGetDevicePnpState(Pdo) != Deleted) {
+            PCHAR           Name;
+            BOOLEAN         Missing;
+
+            Name = PdoGetName(Pdo);
+            Missing = TRUE;
+
+            // If the PDO already exists and its name is in the device list
+            // then we don't want to remove it.
+            for (Index = 0; Devices[Index].Buffer != NULL; Index++) {
+                PANSI_STRING Device = &Devices[Index];
+
+                if (Device->Length == 0)
+                    continue;
+
+                if (strcmp(Name, Device->Buffer) == 0) {
+                    Missing = FALSE;
+                    Device->Length = 0;  // avoid duplication
+                    break;
+                }
+            }
+
+            if (!PdoIsMissing(Pdo)) {
+                if (PdoIsEjectRequested(Pdo)) {
+                    IoRequestDeviceEject(PdoGetDeviceObject(Pdo));
+                } else if (Missing) {
+                    PdoSetMissing(Pdo, "device disappeared");
+
+                    // If the PDO has not yet been enumerated then we can
+                    // go ahead and mark it as deleted, otherwise we need
+                    // to notify PnP manager and wait for the REMOVE_DEVICE
+                    // IRP.
+                    if (PdoGetDevicePnpState(Pdo) == Present) {
+                        PdoSetDevicePnpState(Pdo, Deleted);
+                        PdoDestroy(Pdo);
+                    } else {
+                        NeedInvalidate = TRUE;
+                    }
+                }
+            }
+        }
+
+        ListEntry = Next;
+    }
+
+    // Walk the class list and create PDOs for any new device
+    for (Index = 0; Devices[Index].Buffer != NULL; Index++) {
+        PANSI_STRING Device = &Devices[Index];
+
+        if (Device->Length == 0)
+            continue;
+
+        status = PdoCreate(Fdo, Device);
+        if (NT_SUCCESS(status))
+            NeedInvalidate = TRUE;
+    }
+
+    __FdoReleaseMutex(Fdo);
+
+done:
+    Trace("<====\n");
+
+    return NeedInvalidate;
 }
 
 static FORCEINLINE PANSI_STRING
@@ -766,6 +880,125 @@ __FdoFreeAnsi(
         __FdoFree(Ansi[Index].Buffer);
 
     __FdoFree(Ansi);
+}
+
+static NTSTATUS
+FdoScan(
+    PXENCONS_THREAD     Self,
+    PVOID               Context
+    )
+{
+    PXENCONS_FDO        Fdo = Context;
+    PKEVENT             Event;
+    HANDLE              ParametersKey;
+    NTSTATUS            status;
+
+    Trace("====>\n");
+
+    Event = ThreadGetEvent(Self);
+
+    ParametersKey = DriverGetParametersKey();
+
+    for (;;) {
+        PCHAR           Buffer;
+        PANSI_STRING    Devices;
+        PANSI_STRING    UnsupportedDevices;
+        ULONG           Index;
+        BOOLEAN         NeedInvalidate;
+
+        Trace("waiting...\n");
+
+        (VOID)KeWaitForSingleObject(Event,
+                                    Executive,
+                                    KernelMode,
+                                    FALSE,
+                                    NULL);
+        KeClearEvent(Event);
+
+        if (ThreadIsAlerted(Self))
+            break;
+
+        // It is not safe to use interfaces before this point
+        if (__FdoGetDevicePnpState(Fdo) != Started) {
+            KeSetEvent(&Fdo->ScanEvent, IO_NO_INCREMENT, FALSE);
+            continue;
+        }
+
+        status = XENBUS_STORE(Directory,
+                              &Fdo->StoreInterface,
+                              NULL,
+                              "device",
+                              "console",
+                              &Buffer);
+        if (NT_SUCCESS(status)) {
+            Devices = __FdoMultiSzToUpcaseAnsi(Buffer);
+
+            XENBUS_STORE(Free,
+                         &Fdo->StoreInterface,
+                         Buffer);
+        } else {
+            Devices = NULL;
+        }
+
+        if (Devices == NULL)
+            goto loop;
+
+        if (ParametersKey != NULL) {
+            status = RegistryQuerySzValue(ParametersKey,
+                                          "UnsupportedDevices",
+                                          NULL,
+                                          &UnsupportedDevices);
+            if (!NT_SUCCESS(status))
+                UnsupportedDevices = NULL;
+        } else {
+            UnsupportedDevices = NULL;
+        }
+
+        // NULL out anything in the Devices list that is in the
+        // UnsupportedDevices list
+        for (Index = 0; Devices[Index].Buffer != NULL; Index++) {
+            PANSI_STRING    Device = &Devices[Index];
+            ULONG           Entry;
+            BOOLEAN         Supported;
+
+            Supported = TRUE;
+
+            for (Entry = 0;
+                 UnsupportedDevices != NULL && UnsupportedDevices[Entry].Buffer != NULL;
+                 Entry++) {
+                if (strncmp(Device->Buffer,
+                            UnsupportedDevices[Entry].Buffer,
+                            Device->Length) == 0) {
+                    Supported = FALSE;
+                    break;
+                }
+            }
+
+            if (!Supported)
+                Device->Length = 0;
+        }
+
+        if (UnsupportedDevices != NULL)
+            RegistryFreeSzValue(UnsupportedDevices);
+
+        NeedInvalidate = __FdoEnumerate(Fdo, Devices);
+
+        __FdoFreeAnsi(Devices);
+
+        if (NeedInvalidate) {
+            NeedInvalidate = FALSE;
+            IoInvalidateDeviceRelations(__FdoGetPhysicalDeviceObject(Fdo),
+                                        BusRelations);
+        }
+
+    loop:
+        KeSetEvent(&Fdo->ScanEvent, IO_NO_INCREMENT, FALSE);
+    }
+
+    KeSetEvent(&Fdo->ScanEvent, IO_NO_INCREMENT, FALSE);
+
+    Trace("<====\n");
+    return STATUS_SUCCESS;
 }
 
 static FORCEINLINE BOOLEAN
@@ -989,15 +1222,39 @@ __FdoD3ToD0(
     IN  PXENCONS_FDO    Fdo
     )
 {
+    NTSTATUS            status;
+
     Trace("====>\n");
 
     ASSERT3U(KeGetCurrentIrql(), ==, DISPATCH_LEVEL);
 
     (VOID) FdoSetDistribution(Fdo);
 
+    status = XENBUS_STORE(WatchAdd,
+                          &Fdo->StoreInterface,
+                          "device",
+                          "console",
+                          ThreadGetEvent(Fdo->ScanThread),
+                          &Fdo->ScanWatch);
+    if (!NT_SUCCESS(status))
+        goto fail1;
+
+    (VOID)XENBUS_STORE(Printf,
+                       &Fdo->StoreInterface,
+                       NULL,
+                       "feature/hotplug",
+                       "console",
+                       "%u",
+                       TRUE);
+
     Trace("<====\n");
 
     return STATUS_SUCCESS;
+
+fail1:
+    Error("fail1 (%08x)\n", status);
+
+    return status;
 }
 
 static FORCEINLINE VOID
@@ -1008,6 +1265,17 @@ __FdoD0ToD3(
     Trace("====>\n");
 
     ASSERT3U(KeGetCurrentIrql(), ==, DISPATCH_LEVEL);
+
+    (VOID)XENBUS_STORE(Remove,
+                       &Fdo->StoreInterface,
+                       NULL,
+                       "feature/hotplug",
+                       "console");
+
+    (VOID)XENBUS_STORE(WatchRemove,
+                       &Fdo->StoreInterface,
+                       Fdo->ScanWatch);
+    Fdo->ScanWatch = NULL;
 
     FdoClearDistribution(Fdo);
 
@@ -1221,16 +1489,30 @@ FdoStartDevice(
                       StackLocation->Parameters.StartDevice.AllocatedResources,
                       StackLocation->Parameters.StartDevice.AllocatedResourcesTranslated);
 
-    status = FdoD3ToD0(Fdo);
+    KeInitializeEvent(&Fdo->ScanEvent, NotificationEvent, FALSE);
+
+    status = ThreadCreate(FdoScan, Fdo, &Fdo->ScanThread);
     if (!NT_SUCCESS(status))
         goto fail2;
 
+    status = FdoD3ToD0(Fdo);
+    if (!NT_SUCCESS(status))
+        goto fail3;
+
     __FdoSetDevicePnpState(Fdo, Started);
+    ThreadWake(Fdo->ScanThread);
 
     status = Irp->IoStatus.Status;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
     return status;
+
+fail3:
+    Error("fail3\n");
+
+    ThreadAlert(Fdo->ScanThread);
+    ThreadJoin(Fdo->ScanThread);
+    Fdo->ScanThread = NULL;
 
 fail2:
     Error("fail2\n");
@@ -1291,6 +1573,12 @@ FdoStopDevice(
 
     if (__FdoGetDevicePowerState(Fdo) == PowerDeviceD0)
         FdoD0ToD3(Fdo);
+
+    ThreadAlert(Fdo->ScanThread);
+    ThreadJoin(Fdo->ScanThread);
+    Fdo->ScanThread = NULL;
+
+    RtlZeroMemory(&Fdo->ScanEvent, sizeof(KEVENT));
 
     RtlZeroMemory(&Fdo->Resource, sizeof (FDO_RESOURCE) * RESOURCE_COUNT);
 
@@ -1387,6 +1675,17 @@ FdoRemoveDevice(
     if (__FdoGetPreviousDevicePnpState(Fdo) != Started)
         goto done;
 
+    KeClearEvent(&Fdo->ScanEvent);
+    ThreadWake(Fdo->ScanThread);
+
+    Trace("waiting for scan thread\n");
+
+    (VOID)KeWaitForSingleObject(&Fdo->ScanEvent,
+                                Executive,
+                                KernelMode,
+                                FALSE,
+                                NULL);
+
     __FdoAcquireMutex(Fdo);
 
     ListEntry = Fdo->Dx->ListEntry.Flink;
@@ -1413,6 +1712,12 @@ FdoRemoveDevice(
 
     if (__FdoGetDevicePowerState(Fdo) == PowerDeviceD0)
         FdoD0ToD3(Fdo);
+
+    ThreadAlert(Fdo->ScanThread);
+    ThreadJoin(Fdo->ScanThread);
+    Fdo->ScanThread = NULL;
+
+    RtlZeroMemory(&Fdo->ScanEvent, sizeof(KEVENT));
 
     RtlZeroMemory(&Fdo->Resource, sizeof (FDO_RESOURCE) * RESOURCE_COUNT);
 
@@ -1462,6 +1767,17 @@ FdoQueryDeviceRelations(
 
         goto done;
     }
+
+    KeClearEvent(&Fdo->ScanEvent);
+    ThreadWake(Fdo->ScanThread);
+
+    Trace("waiting for scan thread\n");
+
+    (VOID)KeWaitForSingleObject(&Fdo->ScanEvent,
+                                Executive,
+                                KernelMode,
+                                FALSE,
+                                NULL);
 
     __FdoAcquireMutex(Fdo);
 

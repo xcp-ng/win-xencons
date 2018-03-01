@@ -83,6 +83,11 @@ PdoGetDeviceObject(
     IN  PXENCONS_PDO    Pdo
     );
 
+extern BOOLEAN
+PdoIsDefault(
+    IN  PXENCONS_PDO    Pdo
+    );
+
 extern NTSTATUS
 PdoCreate(
     IN  PXENCONS_FDO    Fdo,

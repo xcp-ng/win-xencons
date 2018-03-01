@@ -71,6 +71,7 @@ struct _XENCONS_PDO {
     XENBUS_SUSPEND_INTERFACE    SuspendInterface;
     PXENBUS_SUSPEND_CALLBACK    SuspendCallbackLate;
 
+    BOOLEAN                     IsDefault;
     PXENCONS_CONSOLE            Console;
 };
 
@@ -286,6 +287,14 @@ __PdoGetName(
     return Dx->Name;
 }
 
+PCHAR
+PdoGetName(
+    IN  PXENCONS_PDO    Pdo
+    )
+{
+    return __PdoGetName(Pdo);
+}
+
 static FORCEINLINE PCHAR
 __PdoGetVendorName(
     IN  PXENCONS_PDO    Pdo
@@ -293,6 +302,32 @@ __PdoGetVendorName(
 {
     return FdoGetVendorName(__PdoGetFdo(Pdo));
 }
+
+static FORCEINLINE BOOLEAN
+__PdoIsDefault(
+    IN  PXENCONS_PDO    Pdo
+    )
+{
+    return Pdo->IsDefault;
+}
+
+BOOLEAN
+PdoIsDefault(
+    IN  PXENCONS_PDO    Pdo
+    )
+{
+    return __PdoIsDefault(Pdo);
+}
+
+static FORCEINLINE VOID
+__PdoSetDefault(
+    IN  PXENCONS_PDO    Pdo,
+    IN  PANSI_STRING    Device
+    )
+{
+    Pdo->IsDefault = (Device == NULL) ? TRUE : FALSE;
+}
+
 
 static FORCEINLINE BOOLEAN
 __PdoSetEjectRequested(
@@ -441,7 +476,11 @@ PdoD3ToD0(
 
     KeLowerIrql(Irql);
 
-    status = ConsoleD3ToD0(Pdo->Console);
+    if (__PdoIsDefault(Pdo))
+        status = ConsoleD3ToD0(Pdo->Console);
+    else
+        status = STATUS_SUCCESS;
+
     if (!NT_SUCCESS(status))
         goto fail4;
 
@@ -495,7 +534,8 @@ PdoD0ToD3(
 #pragma prefast(suppress:28123)
     (VOID) IoSetDeviceInterfaceState(&Pdo->Dx->Link, FALSE);
 
-    ConsoleD0ToD3(Pdo->Console);
+    if (__PdoIsDefault(Pdo))
+        ConsoleD0ToD3(Pdo->Console);
 
     KeRaiseIrql(DISPATCH_LEVEL, &Irql);
 
@@ -1689,7 +1729,10 @@ PdoDispatchCreate(
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
-    status = ConsoleOpen(Pdo->Console, StackLocation->FileObject);
+    if (__PdoIsDefault(Pdo))
+        status = ConsoleOpen(Pdo->Console, StackLocation->FileObject);
+    else
+        status = STATUS_SUCCESS;
 
     Irp->IoStatus.Status = status;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -1708,7 +1751,10 @@ PdoDispatchCleanup(
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
-    status = ConsoleClose(Pdo->Console, StackLocation->FileObject);
+    if (__PdoIsDefault(Pdo))
+        status = ConsoleClose(Pdo->Console, StackLocation->FileObject);
+    else
+        status = STATUS_SUCCESS;
 
     Irp->IoStatus.Status = status;
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -1742,7 +1788,10 @@ PdoDispatchReadWriteControl(
 {
     NTSTATUS            status;
 
-    status = ConsolePutQueue(Pdo->Console, Irp);
+    if (__PdoIsDefault(Pdo))
+        status = ConsolePutQueue(Pdo->Console, Irp);
+    else
+        status = STATUS_DEVICE_NOT_READY;
 
     if (status == STATUS_PENDING) {
         IoMarkIrpPending(Irp);
@@ -1891,7 +1940,13 @@ PdoCreate(
 
     Dx->Pdo = Pdo;
 
-    status = ConsoleCreate(Fdo, &Pdo->Console);
+    __PdoSetDefault(Pdo, Device);
+
+    if (__PdoIsDefault(Pdo))
+        status = ConsoleCreate(Fdo, &Pdo->Console);
+    else
+        status = STATUS_SUCCESS;
+
     if (!NT_SUCCESS(status))
         goto fail5;
 
@@ -1921,8 +1976,12 @@ fail6:
 
     (VOID)__PdoClearEjectRequested(Pdo);
 
-    ConsoleDestroy(Pdo->Console);
+    if (__PdoIsDefault(Pdo))
+        ConsoleDestroy(Pdo->Console);
+
     Pdo->Console = NULL;
+
+    Pdo->IsDefault = FALSE;
 
 fail5:
     Error("fail5\n");
@@ -1990,8 +2049,12 @@ PdoDestroy(
 
     Dx->Pdo = NULL;
 
-    ConsoleDestroy(Pdo->Console);
+    if (__PdoIsDefault(Pdo))
+        ConsoleDestroy(Pdo->Console);
+
     Pdo->Console = NULL;
+
+    Pdo->IsDefault = FALSE;
 
     RtlFreeUnicodeString(&Pdo->Dx->Link);
 
