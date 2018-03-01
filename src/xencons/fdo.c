@@ -41,7 +41,6 @@
 #include <suspend_interface.h>
 #include <store_interface.h>
 #include <console_interface.h>
-#include <xencons_device.h>
 #include <version.h>
 
 #include "driver.h"
@@ -49,7 +48,6 @@
 #include "fdo.h"
 #include "pdo.h"
 #include "mutex.h"
-#include "console.h"
 #include "thread.h"
 #include "names.h"
 #include "dbg_print.h"
@@ -91,8 +89,6 @@ struct _XENCONS_FDO {
     ULONG                       References;
 
     FDO_RESOURCE                Resource[RESOURCE_COUNT];
-
-    PXENCONS_CONSOLE            Console;
 
     XENBUS_DEBUG_INTERFACE      DebugInterface;
     XENBUS_SUSPEND_INTERFACE    SuspendInterface;
@@ -1096,12 +1092,6 @@ FdoD3ToD0(
 
     __FdoReleaseMutex(Fdo);
 
-    status = ConsoleD3ToD0(Fdo->Console);
-    ASSERT(NT_SUCCESS(status));
-
-#pragma prefast(suppress:28123)
-    (VOID) IoSetDeviceInterfaceState(&Fdo->Dx->Link, TRUE);
-
     Trace("<====\n");
 
     return STATUS_SUCCESS;
@@ -1143,11 +1133,6 @@ FdoD0ToD3(
     ASSERT3U(__FdoGetDevicePowerState(Fdo), ==, PowerDeviceD0);
 
     Trace("====>\n");
-
-#pragma prefast(suppress:28123)
-    (VOID) IoSetDeviceInterfaceState(&Fdo->Dx->Link, FALSE);
-
-    ConsoleD0ToD3(Fdo->Console);
 
     __FdoAcquireMutex(Fdo);
 
@@ -2484,85 +2469,6 @@ done:
 }
 
 static DECLSPEC_NOINLINE NTSTATUS
-FdoDispatchCreate(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PIRP            Irp
-    )
-{
-    PIO_STACK_LOCATION  StackLocation;
-    NTSTATUS            status;
-
-    StackLocation = IoGetCurrentIrpStackLocation(Irp);
-
-    status = ConsoleOpen(Fdo->Console, StackLocation->FileObject);
-
-    Irp->IoStatus.Status = status;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-
-    return status;
-}
-
-static DECLSPEC_NOINLINE NTSTATUS
-FdoDispatchCleanup(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PIRP            Irp
-    )
-{
-    PIO_STACK_LOCATION  StackLocation;
-    NTSTATUS            status;
-
-    StackLocation = IoGetCurrentIrpStackLocation(Irp);
-
-    status = ConsoleClose(Fdo->Console, StackLocation->FileObject);
-
-    Irp->IoStatus.Status = status;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-
-    return status;
-}
-
-static DECLSPEC_NOINLINE NTSTATUS
-FdoDispatchClose(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PIRP            Irp
-    )
-{
-    NTSTATUS            status;
-
-    UNREFERENCED_PARAMETER(Fdo);
-
-    status = STATUS_SUCCESS;
-
-    Irp->IoStatus.Status = status;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-
-    return status;
-}
-
-static DECLSPEC_NOINLINE NTSTATUS
-FdoDispatchReadWrite(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PIRP            Irp
-    )
-{
-    NTSTATUS            status;
-
-    status = ConsolePutQueue(Fdo->Console, Irp);
-    if (status != STATUS_PENDING)
-        goto fail1;
-
-    return STATUS_PENDING;
-
-fail1:
-    Error("fail1 (%08x)\n", status);
-
-    Irp->IoStatus.Status = status;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-
-    return status;
-}
-
-static DECLSPEC_NOINLINE NTSTATUS
 FdoDispatchDefault(
     IN  PXENCONS_FDO    Fdo,
     IN  PIRP            Irp
@@ -2600,23 +2506,6 @@ FdoDispatch(
 
     case IRP_MJ_POWER:
         status = FdoDispatchPower(Fdo, Irp);
-        break;
-
-    case IRP_MJ_CREATE:
-        status = FdoDispatchCreate(Fdo, Irp);
-        break;
-
-    case IRP_MJ_CLEANUP:
-        status = FdoDispatchCleanup(Fdo, Irp);
-        break;
-
-    case IRP_MJ_CLOSE:
-        status = FdoDispatchClose(Fdo, Irp);
-        break;
-
-    case IRP_MJ_READ:
-    case IRP_MJ_WRITE:
-        status = FdoDispatchReadWrite(Fdo, Irp);
         break;
 
     default:
@@ -2734,9 +2623,6 @@ DEFINE_FDO_GET_INTERFACE(Suspend, PXENBUS_SUSPEND_INTERFACE)
 DEFINE_FDO_GET_INTERFACE(Store, PXENBUS_STORE_INTERFACE)
 DEFINE_FDO_GET_INTERFACE(Console, PXENBUS_CONSOLE_INTERFACE)
 
-#pragma warning(push)
-#pragma warning(disable:6014) // Leaking memory '&Dx->Link'
-
 NTSTATUS
 FdoCreate(
     IN  PDEVICE_OBJECT      PhysicalDeviceObject
@@ -2761,13 +2647,6 @@ FdoCreate(
 
     Dx = (PXENCONS_DX)FunctionDeviceObject->DeviceExtension;
     RtlZeroMemory(Dx, sizeof (XENCONS_DX));
-
-    status = IoRegisterDeviceInterface(PhysicalDeviceObject,
-                                       &GUID_XENCONS_DEVICE,
-                                       NULL,
-                                       &Dx->Link);
-    if (!NT_SUCCESS(status))
-        goto fail2;
 
     Dx->Type = FUNCTION_DEVICE_OBJECT;
     Dx->DeviceObject = FunctionDeviceObject;
@@ -2845,12 +2724,6 @@ FdoCreate(
     if (!NT_SUCCESS(status))
         goto fail11;
 
-    status = ConsoleCreate(Fdo, &Fdo->Console);
-    if (!NT_SUCCESS(status))
-        goto fail12;
-
-    FunctionDeviceObject->Flags |= DO_BUFFERED_IO;
-
     Dx->Fdo = Fdo;
 
     InitializeMutex(&Fdo->Mutex);
@@ -2863,25 +2736,19 @@ FdoCreate(
 
     status = PdoCreate(Fdo, NULL);
     if (!NT_SUCCESS(status))
-        goto fail13;
+        goto fail12;
 
     FunctionDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
     return STATUS_SUCCESS;
 
-fail13:
-    Error("fail13\n");
+fail12:
+    Error("fail12\n");
 
     Dx->Fdo = Fdo;
 
     RtlZeroMemory(&Fdo->Mutex, sizeof(MUTEX));
     RtlZeroMemory(&Dx->ListEntry, sizeof(LIST_ENTRY));
     Fdo->References = 0;
-
-    ConsoleDestroy(Fdo->Console);
-    Fdo->Console = NULL;
-
-fail12:
-    Error("fail12\n");
 
     RtlZeroMemory(&Fdo->ConsoleInterface,
                   sizeof(XENBUS_CONSOLE_INTERFACE));
@@ -2944,11 +2811,6 @@ fail4:
 fail3:
     Error("fail3\n");
 
-    RtlFreeUnicodeString(&Dx->Link);
-
-fail2:
-    Error("fail2\n");
-
     IoDeleteDevice(FunctionDeviceObject);
 
 fail1:
@@ -2978,9 +2840,6 @@ FdoDestroy(
     RtlZeroMemory(&Fdo->Mutex, sizeof(MUTEX));
 
     Dx->Fdo = NULL;
-
-    ConsoleDestroy(Fdo->Console);
-    Fdo->Console = NULL;
 
     RtlZeroMemory(&Fdo->ConsoleInterface,
                   sizeof (XENBUS_CONSOLE_INTERFACE));
@@ -3016,9 +2875,5 @@ FdoDestroy(
     ASSERT(IsZeroMemory(Fdo, sizeof (XENCONS_FDO)));
     __FdoFree(Fdo);
 
-    RtlFreeUnicodeString(&Dx->Link);
-
     IoDeleteDevice(FunctionDeviceObject);
 }
-
-#pragma warning(pop)

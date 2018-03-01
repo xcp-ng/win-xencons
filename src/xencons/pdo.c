@@ -37,12 +37,14 @@
 #include <stdlib.h>
 
 #include <suspend_interface.h>
+#include <xencons_device.h>
 #include <version.h>
 
 #include "driver.h"
 #include "names.h"
 #include "fdo.h"
 #include "pdo.h"
+#include "console.h"
 #include "thread.h"
 #include "dbg_print.h"
 #include "assert.h"
@@ -68,6 +70,8 @@ struct _XENCONS_PDO {
 
     XENBUS_SUSPEND_INTERFACE    SuspendInterface;
     PXENBUS_SUSPEND_CALLBACK    SuspendCallbackLate;
+
+    PXENCONS_CONSOLE            Console;
 };
 
 static FORCEINLINE PVOID
@@ -437,9 +441,26 @@ PdoD3ToD0(
 
     KeLowerIrql(Irql);
 
+    status = ConsoleD3ToD0(Pdo->Console);
+    if (!NT_SUCCESS(status))
+        goto fail4;
+
+#pragma prefast(suppress:28123)
+    (VOID) IoSetDeviceInterfaceState(&Pdo->Dx->Link, TRUE);
+
     Trace("(%s) <====\n", __PdoGetName(Pdo));
 
     return STATUS_SUCCESS;
+
+fail4:
+    Error("fail4\n");
+
+    KeRaiseIrql(DISPATCH_LEVEL, &Irql);
+
+    XENBUS_SUSPEND(Deregister,
+                   &Pdo->SuspendInterface,
+                   Pdo->SuspendCallbackLate);
+    Pdo->SuspendCallbackLate = NULL;
 
 fail3:
     Error("fail3\n");
@@ -470,6 +491,11 @@ PdoD0ToD3(
     Trace("(%s) ====>\n", __PdoGetName(Pdo));
 
     ASSERT3U(KeGetCurrentIrql(), == , PASSIVE_LEVEL);
+
+#pragma prefast(suppress:28123)
+    (VOID) IoSetDeviceInterfaceState(&Pdo->Dx->Link, FALSE);
+
+    ConsoleD0ToD3(Pdo->Console);
 
     KeRaiseIrql(DISPATCH_LEVEL, &Irql);
 
@@ -527,9 +553,20 @@ PdoStartDevice(
 {
     NTSTATUS            status;
 
-    status = PdoD3ToD0(Pdo);
+    if (Pdo->Dx->Link.Length != 0)
+        goto done;
+
+    status = IoRegisterDeviceInterface(__PdoGetDeviceObject(Pdo),
+                                       &GUID_XENCONS_DEVICE,
+                                       NULL,
+                                       &Pdo->Dx->Link);
     if (!NT_SUCCESS(status))
         goto fail1;
+
+done:
+    status = PdoD3ToD0(Pdo);
+    if (!NT_SUCCESS(status))
+        goto fail2;
 
     __PdoSetDevicePnpState(Pdo, Started);
 
@@ -537,6 +574,9 @@ PdoStartDevice(
     IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
     return STATUS_SUCCESS;
+
+fail2:
+    Error("fail2\n");
 
 fail1:
     Error("fail1 (%08x)\n", status);
@@ -1639,6 +1679,85 @@ PdoDispatchPower(
 }
 
 static DECLSPEC_NOINLINE NTSTATUS
+PdoDispatchCreate(
+    IN  PXENCONS_PDO    Pdo,
+    IN  PIRP            Irp
+    )
+{
+    PIO_STACK_LOCATION  StackLocation;
+    NTSTATUS            status;
+
+    StackLocation = IoGetCurrentIrpStackLocation(Irp);
+
+    status = ConsoleOpen(Pdo->Console, StackLocation->FileObject);
+
+    Irp->IoStatus.Status = status;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return status;
+}
+
+static DECLSPEC_NOINLINE NTSTATUS
+PdoDispatchCleanup(
+    IN  PXENCONS_PDO    Pdo,
+    IN  PIRP            Irp
+    )
+{
+    PIO_STACK_LOCATION  StackLocation;
+    NTSTATUS            status;
+
+    StackLocation = IoGetCurrentIrpStackLocation(Irp);
+
+    status = ConsoleClose(Pdo->Console, StackLocation->FileObject);
+
+    Irp->IoStatus.Status = status;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return status;
+}
+
+static DECLSPEC_NOINLINE NTSTATUS
+PdoDispatchClose(
+    IN  PXENCONS_PDO    Pdo,
+    IN  PIRP            Irp
+    )
+{
+    NTSTATUS            status;
+
+    UNREFERENCED_PARAMETER(Pdo);
+
+    status = STATUS_SUCCESS;
+
+    Irp->IoStatus.Status = status;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return status;
+}
+
+static DECLSPEC_NOINLINE NTSTATUS
+PdoDispatchReadWrite(
+    IN  PXENCONS_PDO    Pdo,
+    IN  PIRP            Irp
+    )
+{
+    NTSTATUS            status;
+
+    status = ConsolePutQueue(Pdo->Console, Irp);
+    if (status != STATUS_PENDING)
+        goto fail1;
+
+    return STATUS_PENDING;
+
+fail1:
+    Error("fail1 (%08x)\n", status);
+
+    Irp->IoStatus.Status = status;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+
+    return status;
+}
+
+static DECLSPEC_NOINLINE NTSTATUS
 PdoDispatchDefault(
     IN  PXENCONS_PDO    Pdo,
     IN  PIRP            Irp
@@ -1672,6 +1791,23 @@ PdoDispatch(
 
     case IRP_MJ_POWER:
         status = PdoDispatchPower(Pdo, Irp);
+        break;
+
+    case IRP_MJ_CREATE:
+        status = PdoDispatchCreate(Pdo, Irp);
+        break;
+
+    case IRP_MJ_CLEANUP:
+        status = PdoDispatchCleanup(Pdo, Irp);
+        break;
+
+    case IRP_MJ_CLOSE:
+        status = PdoDispatchClose(Pdo, Irp);
+        break;
+
+    case IRP_MJ_READ:
+    case IRP_MJ_WRITE:
+        status = PdoDispatchReadWrite(Pdo, Irp);
         break;
 
     default:
@@ -1755,30 +1891,41 @@ PdoCreate(
 
     Dx->Pdo = Pdo;
 
-    status = FdoAddPhysicalDeviceObject(Fdo, Pdo);
+    status = ConsoleCreate(Fdo, &Pdo->Console);
     if (!NT_SUCCESS(status))
         goto fail5;
 
+    status = FdoAddPhysicalDeviceObject(Fdo, Pdo);
+    if (!NT_SUCCESS(status))
+        goto fail6;
+
     status = STATUS_UNSUCCESSFUL;
     if (__PdoIsEjectRequested(Pdo))
-        goto fail6;
+        goto fail7;
 
     Info("%p (%s)\n",
          PhysicalDeviceObject,
          __PdoGetName(Pdo));
 
+    PhysicalDeviceObject->Flags |= DO_BUFFERED_IO;
     PhysicalDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
     return STATUS_SUCCESS;
+
+fail7:
+    Error("fail7\n");
+
+    FdoRemovePhysicalDeviceObject(Fdo, Pdo);
 
 fail6:
     Error("fail6\n");
 
-    FdoRemovePhysicalDeviceObject(Fdo, Pdo);
+    (VOID)__PdoClearEjectRequested(Pdo);
+
+    ConsoleDestroy(Pdo->Console);
+    Pdo->Console = NULL;
 
 fail5:
     Error("fail5\n");
-
-    (VOID)__PdoClearEjectRequested(Pdo);
 
     Dx->Pdo = NULL;
 
@@ -1842,6 +1989,11 @@ PdoDestroy(
     (VOID)__PdoClearEjectRequested(Pdo);
 
     Dx->Pdo = NULL;
+
+    ConsoleDestroy(Pdo->Console);
+    Pdo->Console = NULL;
+
+    RtlFreeUnicodeString(&Pdo->Dx->Link);
 
     RtlZeroMemory(&Pdo->SuspendInterface,
                   sizeof(XENBUS_SUSPEND_INTERFACE));
