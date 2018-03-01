@@ -113,7 +113,7 @@ AddReg = Monitor_Parameters
 
 [Monitor_Parameters]
 HKR,"Parameters",,0x00000010
-HKR,"Parameters","Executable",0x00000000,"xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe"
+HKR,"Parameters\default","Executable",0x00000000,"xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe"
 
 [Monitor_EventLog]
 AddReg=Monitor_EventLog_AddReg

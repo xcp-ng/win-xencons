@@ -39,7 +39,7 @@ typedef struct _TTY_STREAM {
     HANDLE  Write;
 } TTY_STREAM, *PTTY_STREAM;
 
-#define PIPE_NAME TEXT("\\\\.\\pipe\\xencons")
+#define PIPE_NAME TEXT("\\\\.\\pipe\\xencons\\default")
 #define MAXIMUM_BUFFER_SIZE 1024
 
 typedef struct _TTY_CONTEXT {
@@ -402,6 +402,9 @@ _tmain(
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
 
+    if (!WaitNamedPipe(PIPE_NAME, NMPWAIT_USE_DEFAULT_WAIT))
+        ExitProcess(1);
+
     Context->Device.Read = CreateFile(PIPE_NAME,
                                       GENERIC_READ,
                                       FILE_SHARE_WRITE,
@@ -411,6 +414,9 @@ _tmain(
                                       NULL);
 
     if (Context->Device.Read == INVALID_HANDLE_VALUE)
+        ExitProcess(1);
+
+    if (!WaitNamedPipe(PIPE_NAME, NMPWAIT_USE_DEFAULT_WAIT))
         ExitProcess(1);
 
     Context->Device.Write = CreateFile(PIPE_NAME,

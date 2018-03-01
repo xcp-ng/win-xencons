@@ -32,7 +32,7 @@
 #define INITGUID 1
 
 #include <windows.h>
-#include <tchar.h>
+#include <winioctl.h>
 #include <stdlib.h>
 #include <strsafe.h>
 #include <wtsapi32.h>
@@ -50,40 +50,45 @@
 #define MONITOR_NAME        __MODULE__
 #define MONITOR_DISPLAYNAME MONITOR_NAME
 
-typedef struct _MONITOR_PIPE {
-    HANDLE                  Pipe;
-    HANDLE                  Event;
-    HANDLE                  Thread;
-    LIST_ENTRY              ListEntry;
-} MONITOR_PIPE, *PMONITOR_PIPE;
-
 typedef struct _MONITOR_CONTEXT {
     SERVICE_STATUS          Status;
     SERVICE_STATUS_HANDLE   Service;
-    HKEY                    ParametersKey;
     HANDLE                  EventLog;
     HANDLE                  StopEvent;
-    HANDLE                  AddEvent;
-    HANDLE                  RemoveEvent;
-    PTCHAR                  Executable;
+    HKEY                    ParametersKey;
     HDEVNOTIFY              InterfaceNotification;
-    PTCHAR                  DevicePath;
-    HDEVNOTIFY              DeviceNotification;
-    HANDLE                  Device;
-    HANDLE                  MonitorEvent;
-    HANDLE                  MonitorThread;
-    HANDLE                  DeviceEvent;
-    HANDLE                  DeviceThread;
-    HANDLE                  ServerEvent;
-    HANDLE                  ServerThread;
     CRITICAL_SECTION        CriticalSection;
     LIST_ENTRY              ListHead;
     DWORD                   ListCount;
 } MONITOR_CONTEXT, *PMONITOR_CONTEXT;
 
-MONITOR_CONTEXT MonitorContext;
+typedef struct _MONITOR_CONSOLE {
+    LIST_ENTRY              ListEntry;
+    PWCHAR                  DevicePath;
+    HANDLE                  DeviceHandle;
+    HDEVNOTIFY              DeviceNotification;
+    PCHAR                   DeviceName; // protocol and instance?
+    HANDLE                  ExecutableThread;
+    HANDLE                  ExecutableEvent;
+    HANDLE                  DeviceThread;
+    HANDLE                  DeviceEvent;
+    HANDLE                  ServerThread;
+    HANDLE                  ServerEvent;
+    CRITICAL_SECTION        CriticalSection;
+    LIST_ENTRY              ListHead;
+    DWORD                   ListCount;
+} MONITOR_CONSOLE, *PMONITOR_CONSOLE;
 
-#define PIPE_NAME TEXT("\\\\.\\pipe\\xencons")
+typedef struct _MONITOR_CONNECTION {
+    PMONITOR_CONSOLE        Console;
+    LIST_ENTRY              ListEntry;
+    HANDLE                  Pipe;
+    HANDLE                  Thread;
+} MONITOR_CONNECTION, *PMONITOR_CONNECTION;
+
+static MONITOR_CONTEXT MonitorContext;
+
+#define PIPE_BASE_NAME "\\\\.\\pipe\\xencons\\"
 
 #define MAXIMUM_BUFFER_SIZE 1024
 
@@ -104,15 +109,15 @@ __Log(
 {
 #if DBG
     PMONITOR_CONTEXT    Context = &MonitorContext;
-    const TCHAR         *Strings[1];
+    const CHAR          *Strings[1];
 #endif
-    TCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
+    CHAR                Buffer[MAXIMUM_BUFFER_SIZE];
     va_list             Arguments;
     size_t              Length;
     HRESULT             Result;
 
     va_start(Arguments, Format);
-    Result = StringCchVPrintf(Buffer,
+    Result = StringCchVPrintfA(Buffer,
                               MAXIMUM_BUFFER_SIZE,
                               Format,
                               Arguments);
@@ -121,7 +126,7 @@ __Log(
     if (Result != S_OK && Result != STRSAFE_E_INSUFFICIENT_BUFFER)
         return;
 
-    Result = StringCchLength(Buffer, MAXIMUM_BUFFER_SIZE, &Length);
+    Result = StringCchLengthA(Buffer, MAXIMUM_BUFFER_SIZE, &Length);
     if (Result != S_OK)
         return;
 
@@ -139,7 +144,7 @@ __Log(
     Strings[0] = Buffer;
 
     if (Context->EventLog != NULL)
-        ReportEvent(Context->EventLog,
+        ReportEventA(Context->EventLog,
                     EVENTLOG_INFORMATION_TYPE,
                     0,
                     MONITOR_LOG,
@@ -152,23 +157,23 @@ __Log(
 }
 
 #define Log(_Format, ...) \
-    __Log(TEXT(__MODULE__ "|" __FUNCTION__ ": " _Format), __VA_ARGS__)
+    __Log(__MODULE__ "|" __FUNCTION__ ": " _Format, __VA_ARGS__)
 
-static PTCHAR
+static PCHAR
 GetErrorMessage(
     IN  HRESULT Error
     )
 {
-    PTCHAR      Message;
+    PCHAR       Message;
     ULONG       Index;
 
-    if (!FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+    if (!FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
                        FORMAT_MESSAGE_FROM_SYSTEM |
                        FORMAT_MESSAGE_IGNORE_INSERTS,
                        NULL,
                        Error,
                        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                       (LPTSTR)&Message,
+                       (LPSTR)&Message,
                        0,
                        NULL))
         return NULL;
@@ -210,7 +215,8 @@ static VOID
 ReportStatus(
     IN  DWORD           CurrentState,
     IN  DWORD           Win32ExitCode,
-    IN  DWORD           WaitHint)
+    IN  DWORD           WaitHint
+    )
 {
     PMONITOR_CONTEXT    Context = &MonitorContext;
     static DWORD        CheckPoint = 1;
@@ -249,116 +255,11 @@ fail1:
     Error = GetLastError();
 
     {
-        PTCHAR  Message;
+        PCHAR  Message;
         Message = GetErrorMessage(Error);
         Log("fail1 (%s)", Message);
         LocalFree(Message);
     }
-}
-
-static BOOL
-MonitorGetPath(
-    IN  const GUID  *Guid,
-    OUT PTCHAR      *Path
-    )
-{
-    HDEVINFO                            DeviceInfoSet;
-    SP_DEVICE_INTERFACE_DATA            DeviceInterfaceData;
-    PSP_DEVICE_INTERFACE_DETAIL_DATA    DeviceInterfaceDetail;
-    DWORD                               Size;
-    HRESULT                             Error;
-    BOOL                                Success;
-
-    Log("====>");
-
-    DeviceInfoSet = SetupDiGetClassDevs(Guid,
-                                        NULL,
-                                        NULL,
-                                        DIGCF_PRESENT |
-                                        DIGCF_DEVICEINTERFACE);
-    if (DeviceInfoSet == INVALID_HANDLE_VALUE)
-        goto fail1;
-
-    DeviceInterfaceData.cbSize = sizeof (SP_DEVICE_INTERFACE_DATA);
-
-    Success = SetupDiEnumDeviceInterfaces(DeviceInfoSet,
-                                          NULL,
-                                          Guid,
-                                          0,
-                                          &DeviceInterfaceData);
-    if (!Success)
-        goto fail2;
-
-    Success = SetupDiGetDeviceInterfaceDetail(DeviceInfoSet,
-                                              &DeviceInterfaceData,
-                                              NULL,
-                                              0,
-                                              &Size,
-                                              NULL);
-    if (!Success && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-        goto fail3;
-
-    DeviceInterfaceDetail = calloc(1, Size);
-    if (DeviceInterfaceDetail == NULL)
-        goto fail4;
-
-    DeviceInterfaceDetail->cbSize =
-        sizeof (SP_DEVICE_INTERFACE_DETAIL_DATA);
-
-    Success = SetupDiGetDeviceInterfaceDetail(DeviceInfoSet,
-                                              &DeviceInterfaceData,
-                                              DeviceInterfaceDetail,
-                                              Size,
-                                              NULL,
-                                              NULL);
-    if (!Success)
-        goto fail5;
-
-    *Path = _tcsdup(DeviceInterfaceDetail->DevicePath);
-
-    if (*Path == NULL)
-        goto fail6;
-
-    Log("%s", *Path);
-
-    free(DeviceInterfaceDetail);
-
-    SetupDiDestroyDeviceInfoList(DeviceInfoSet);
-
-    Log("<====");
-
-    return TRUE;
-
-fail6:
-    Log("fail6");
-
-fail5:
-    Log("fail5");
-
-    free(DeviceInterfaceDetail);
-
-fail4:
-    Log("fail4");
-
-fail3:
-    Log("fail3");
-
-fail2:
-    Log("fail2");
-
-    SetupDiDestroyDeviceInfoList(DeviceInfoSet);
-
-fail1:
-    Error = GetLastError();
-
-    {
-        PTCHAR  Message;
-        Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
-        LocalFree(Message);
-    }
-
-    return FALSE;
 }
 
 static FORCEINLINE VOID
@@ -425,13 +326,16 @@ PutString(
     }
 }
 
+#define ECHO(_Handle, _Buffer) \
+    PutString((_Handle), (PUCHAR)_Buffer, (DWORD)strlen((_Buffer)) * sizeof(CHAR))
+
 DWORD WINAPI
-PipeThread(
+ConnectionThread(
     IN  LPVOID          Argument
     )
 {
-    PMONITOR_CONTEXT    Context = &MonitorContext;
-    PMONITOR_PIPE       Pipe = (PMONITOR_PIPE)Argument;
+    PMONITOR_CONNECTION Connection = (PMONITOR_CONNECTION)Argument;
+    PMONITOR_CONSOLE    Console = Connection->Console;
     UCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
     OVERLAPPED          Overlapped;
     HANDLE              Handle[2];
@@ -439,7 +343,7 @@ PipeThread(
     DWORD               Object;
     HRESULT             Error;
 
-    Log("====>");
+    Log("====> %s", Console->DeviceName);
 
     ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
     Overlapped.hEvent = CreateEvent(NULL,
@@ -449,16 +353,16 @@ PipeThread(
     if (Overlapped.hEvent == NULL)
         goto fail1;
 
-    Handle[0] = Pipe->Event;
+    Handle[0] = Console->ServerEvent;
     Handle[1] = Overlapped.hEvent;
 
-    EnterCriticalSection(&Context->CriticalSection);
-    __InsertTailList(&Context->ListHead, &Pipe->ListEntry);
-    ++Context->ListCount;
-    LeaveCriticalSection(&Context->CriticalSection);
+    EnterCriticalSection(&Console->CriticalSection);
+    __InsertTailList(&Console->ListHead, &Connection->ListEntry);
+    ++Console->ListCount;
+    LeaveCriticalSection(&Console->CriticalSection);
 
     for (;;) {
-        (VOID) ReadFile(Pipe->Pipe,
+        (VOID) ReadFile(Connection->Pipe,
                         Buffer,
                         sizeof(Buffer),
                         NULL,
@@ -471,7 +375,7 @@ PipeThread(
         if (Object == WAIT_OBJECT_0)
             break;
 
-        if (!GetOverlappedResult(Pipe->Pipe,
+        if (!GetOverlappedResult(Connection->Pipe,
                                  &Overlapped,
                                  &Length,
                                  FALSE))
@@ -479,25 +383,25 @@ PipeThread(
 
         ResetEvent(Overlapped.hEvent);
 
-        PutString(Context->Device,
+        PutString(Console->DeviceHandle,
                   Buffer,
                   Length);
     }
 
-    EnterCriticalSection(&Context->CriticalSection);
-    __RemoveEntryList(&Pipe->ListEntry);
-    --Context->ListCount;
-    LeaveCriticalSection(&Context->CriticalSection);
+    EnterCriticalSection(&Console->CriticalSection);
+    __RemoveEntryList(&Connection->ListEntry);
+    --Console->ListCount;
+    LeaveCriticalSection(&Console->CriticalSection);
 
     CloseHandle(Overlapped.hEvent);
 
-    FlushFileBuffers(Pipe->Pipe);
-    DisconnectNamedPipe(Pipe->Pipe);
-    CloseHandle(Pipe->Pipe);
-    CloseHandle(Pipe->Thread);
-    free(Pipe);
+    FlushFileBuffers(Connection->Pipe);
+    DisconnectNamedPipe(Connection->Pipe);
+    CloseHandle(Connection->Pipe);
+    CloseHandle(Connection->Thread);
+    free(Connection);
 
-    Log("<====");
+    Log("<==== %s", Console->DeviceName);
 
     return 0;
 
@@ -519,17 +423,16 @@ ServerThread(
     IN  LPVOID          Argument
     )
 {
-    PMONITOR_CONTEXT    Context = &MonitorContext;
+    PMONITOR_CONSOLE    Console = (PMONITOR_CONSOLE)Argument;
+    CHAR                PipeName[MAXIMUM_BUFFER_SIZE];
     OVERLAPPED          Overlapped;
     HANDLE              Handle[2];
     HANDLE              Pipe;
     DWORD               Object;
-    PMONITOR_PIPE       Instance;
+    PMONITOR_CONNECTION Connection;
     HRESULT             Error;
 
-    UNREFERENCED_PARAMETER(Argument);
-
-    Log("====>");
+    Log("====> %s", Console->DeviceName);
 
     ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
     Overlapped.hEvent = CreateEvent(NULL,
@@ -539,11 +442,21 @@ ServerThread(
     if (Overlapped.hEvent == NULL)
         goto fail1;
 
-    Handle[0] = Context->ServerEvent;
+    Handle[0] = Console->ServerEvent;
     Handle[1] = Overlapped.hEvent;
 
+    Error = StringCchPrintfA(PipeName,
+                             MAXIMUM_BUFFER_SIZE,
+                             "%s%s",
+                             PIPE_BASE_NAME,
+                             Console->DeviceName);
+    if (Error != S_OK && Error != STRSAFE_E_INSUFFICIENT_BUFFER)
+        goto fail2;
+
+    Log("%s", PipeName);
+
     for (;;) {
-        Pipe = CreateNamedPipe(PIPE_NAME,
+        Pipe = CreateNamedPipe(PipeName,
                                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                                PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE,
                                PIPE_UNLIMITED_INSTANCES,
@@ -552,7 +465,7 @@ ServerThread(
                                0,
                                NULL);
         if (Pipe == INVALID_HANDLE_VALUE)
-            goto fail2;
+            goto fail3;
 
         (VOID) ConnectNamedPipe(Pipe,
                                 &Overlapped);
@@ -568,132 +481,46 @@ ServerThread(
 
         ResetEvent(Overlapped.hEvent);
 
-        Instance = (PMONITOR_PIPE)malloc(sizeof(MONITOR_PIPE));
-        if (Instance == NULL)
-            goto fail3;
-
-        __InitializeListHead(&Instance->ListEntry);
-        Instance->Pipe = Pipe;
-        Instance->Event = Context->ServerEvent;
-        Instance->Thread = CreateThread(NULL,
-                                        0,
-                                        PipeThread,
-                                        Instance,
-                                        0,
-                                        NULL);
-        if (Instance->Thread == INVALID_HANDLE_VALUE)
+        Connection = (PMONITOR_CONNECTION)malloc(sizeof(MONITOR_CONNECTION));
+        if (Connection == NULL)
             goto fail4;
+
+        __InitializeListHead(&Connection->ListEntry);
+        Connection->Console = Console;
+        Connection->Pipe = Pipe;
+        Connection->Thread = CreateThread(NULL,
+                                          0,
+                                          ConnectionThread,
+                                          Connection,
+                                          0,
+                                          NULL);
+        if (Connection->Thread == NULL)
+            goto fail5;
     }
 
     CloseHandle(Overlapped.hEvent);
 
-    Log("<====");
+    Log("<==== %s", Console->DeviceName);
 
     return 0;
+
+fail5:
+    Log("fail5");
+
+    free(Connection);
 
 fail4:
     Log("fail4");
 
-    free(Instance);
+    CloseHandle(Pipe);
 
 fail3:
     Log("fail3");
 
-    CloseHandle(Pipe);
-
 fail2:
     Log("fail2");
 
-fail1:
-    Error = GetLastError();
-
-    {
-        PTCHAR  Message;
-        Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
-        LocalFree(Message);
-    }
-
-    return 1;
-}
-
-DWORD WINAPI
-MonitorThread(
-    IN  LPVOID          Argument
-    )
-{
-    PMONITOR_CONTEXT    Context = &MonitorContext;
-    PROCESS_INFORMATION ProcessInfo;
-    STARTUPINFO         StartupInfo;
-    BOOL                Success;
-    HANDLE              Handle[2];
-    DWORD               Object;
-    HRESULT             Error;
-
-    UNREFERENCED_PARAMETER(Argument);
-
-    Log("====>");
-
-    // If there is no executable, this thread can finish now.
-    if (Context->Executable == NULL)
-        goto done;
-
-again:
-    ZeroMemory(&ProcessInfo, sizeof (ProcessInfo));
-    ZeroMemory(&StartupInfo, sizeof (StartupInfo));
-    StartupInfo.cb = sizeof (StartupInfo);
-
-    Log("Executing: %s", Context->Executable);
-
-#pragma warning(suppress:6053) // CommandLine might not be NUL-terminated
-    Success = CreateProcess(NULL,
-                            Context->Executable,
-                            NULL,
-                            NULL,
-                            FALSE,
-                            CREATE_NO_WINDOW |
-                            CREATE_NEW_PROCESS_GROUP,
-                            NULL,
-                            NULL,
-                            &StartupInfo,
-                            &ProcessInfo);
-    if (!Success)
-        goto fail1;
-
-    Handle[0] = Context->MonitorEvent;
-    Handle[1] = ProcessInfo.hProcess;
-
-    Object = WaitForMultipleObjects(ARRAYSIZE(Handle),
-                                   Handle,
-                                   FALSE,
-                                   INFINITE);
-
-#define WAIT_OBJECT_1 (WAIT_OBJECT_0 + 1)
-
-    switch (Object) {
-    case WAIT_OBJECT_0:
-        ResetEvent(Context->MonitorEvent);
-
-        TerminateProcess(ProcessInfo.hProcess, 1);
-        CloseHandle(ProcessInfo.hProcess);
-        CloseHandle(ProcessInfo.hThread);
-        break;
-
-    case WAIT_OBJECT_1:
-        CloseHandle(ProcessInfo.hProcess);
-        CloseHandle(ProcessInfo.hThread);
-        goto again;
-
-    default:
-        break;
-    }
-
-//#undef WAIT_OBJECT_1
-
-done:
-    Log("<====");
-
-    return 0;
+    CloseHandle(Overlapped.hEvent);
 
 fail1:
     Error = GetLastError();
@@ -713,7 +540,7 @@ DeviceThread(
     IN  LPVOID          Argument
     )
 {
-    PMONITOR_CONTEXT    Context = &MonitorContext;
+    PMONITOR_CONSOLE    Console = (PMONITOR_CONSOLE)Argument;
     OVERLAPPED          Overlapped;
     HANDLE              Device;
     UCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
@@ -722,9 +549,7 @@ DeviceThread(
     HANDLE              Handles[2];
     DWORD               Error;
 
-    UNREFERENCED_PARAMETER(Argument);
-
-    Log("====>");
+    Log("====> %s", Console->DeviceName);
 
     ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
     Overlapped.hEvent = CreateEvent(NULL,
@@ -734,16 +559,16 @@ DeviceThread(
     if (Overlapped.hEvent == NULL)
         goto fail1;
 
-    Handles[0] = Context->DeviceEvent;
+    Handles[0] = Console->DeviceEvent;
     Handles[1] = Overlapped.hEvent;
 
-    Device = CreateFile(Context->DevicePath,
-                        GENERIC_READ,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE,
-                        NULL,
-                        OPEN_EXISTING,
-                        FILE_FLAG_OVERLAPPED,
-                        NULL);
+    Device = CreateFileW(Console->DevicePath,
+                         GENERIC_READ,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE,
+                         NULL,
+                         OPEN_EXISTING,
+                         FILE_FLAG_OVERLAPPED,
+                         NULL);
     if (Device == INVALID_HANDLE_VALUE)
         goto fail2;
 
@@ -771,27 +596,30 @@ DeviceThread(
 
         ResetEvent(Overlapped.hEvent);
 
-        EnterCriticalSection(&Context->CriticalSection);
+        EnterCriticalSection(&Console->CriticalSection);
 
-        for (ListEntry = Context->ListHead.Flink;
-             ListEntry != &Context->ListHead;
-             ListEntry = ListEntry->Flink) {
-            PMONITOR_PIPE   Instance;
+        for (ListEntry = Console->ListHead.Flink;
+                ListEntry != &Console->ListHead;
+                ListEntry = ListEntry->Flink) {
+            PMONITOR_CONNECTION Connection;
 
-            Instance = CONTAINING_RECORD(ListEntry, MONITOR_PIPE, ListEntry);
+            Connection = CONTAINING_RECORD(ListEntry,
+                                           MONITOR_CONNECTION,
+                                           ListEntry);
 
-            PutString(Instance->Pipe,
+            PutString(Connection->Pipe,
                       Buffer,
                       Length);
         }
-        LeaveCriticalSection(&Context->CriticalSection);
+
+        LeaveCriticalSection(&Console->CriticalSection);
     }
 
     CloseHandle(Device);
 
     CloseHandle(Overlapped.hEvent);
 
-    Log("<====");
+    Log("<==== %s", Console->DeviceName);
 
     return 0;
 
@@ -813,167 +641,89 @@ fail1:
     return 1;
 }
 
-#define ECHO(_Handle, _Buffer) \
-    PutString((_Handle), (PUCHAR)TEXT(_Buffer), (DWORD)_tcslen((_Buffer)) * sizeof(TCHAR))
-
-static VOID
-MonitorAdd(
-    VOID
+static BOOL
+GetExecutable(
+    IN  PCHAR           DeviceName,
+    OUT PCHAR           *Executable
     )
 {
-    PMONITOR_CONTEXT        Context = &MonitorContext;
-    PTCHAR                  Path;
-    DEV_BROADCAST_HANDLE    Handle;
-    HRESULT                 Error;
-    BOOL                    Success;
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    HKEY                Key;
+    DWORD               MaxValueLength;
+    DWORD               ExecutableLength;
+    DWORD               Type;
+    HRESULT             Error;
 
-    if (Context->Device != INVALID_HANDLE_VALUE)
-        return;
-
-    Log("====>");
-
-    Success = MonitorGetPath(&GUID_XENCONS_DEVICE, &Path);
-
-    if (!Success)
+    Error = RegOpenKeyExA(Context->ParametersKey,
+                          DeviceName,
+                          0,
+                          KEY_READ,
+                          &Key);
+    if (Error != ERROR_SUCCESS) {
+        SetLastError(Error);
         goto fail1;
+    }
 
-    Context->Device = CreateFile(Path,
-                                 GENERIC_WRITE,
-                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                 NULL,
-                                 OPEN_EXISTING,
-                                 FILE_ATTRIBUTE_NORMAL,
-                                 NULL);
-
-    if (Context->Device == INVALID_HANDLE_VALUE)
+    Error = RegQueryInfoKey(Key,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            NULL,
+                            &MaxValueLength,
+                            NULL,
+                            NULL);
+    if (Error != ERROR_SUCCESS) {
+        SetLastError(Error);
         goto fail2;
+    }
 
-    ECHO(Context->Device, "\r\n[ATTACHED]\r\n");
+    ExecutableLength = MaxValueLength;
 
-    ZeroMemory(&Handle, sizeof (Handle));
-    Handle.dbch_size = sizeof (Handle);
-    Handle.dbch_devicetype = DBT_DEVTYP_HANDLE;
-    Handle.dbch_handle = Context->Device;
-
-    Context->DeviceNotification =
-        RegisterDeviceNotification(Context->Service,
-                                   &Handle,
-                                   DEVICE_NOTIFY_SERVICE_HANDLE);
-    if (Context->DeviceNotification == NULL)
+    *Executable = calloc(1, ExecutableLength);
+    if (Executable == NULL)
         goto fail3;
 
-    Context->DevicePath = Path;
-    __InitializeListHead(&Context->ListHead);
-    InitializeCriticalSection(&Context->CriticalSection);
-
-    Context->MonitorEvent = CreateEvent(NULL,
-                                        TRUE,
-                                        FALSE,
-                                        NULL);
-
-    if (Context->MonitorEvent == NULL)
+    Error = RegQueryValueExA(Key,
+                             "Executable",
+                             NULL,
+                             &Type,
+                             (LPBYTE)(*Executable),
+                             &ExecutableLength);
+    if (Error != ERROR_SUCCESS) {
+        SetLastError(Error);
         goto fail4;
+    }
 
-    Context->MonitorThread = CreateThread(NULL,
-                                          0,
-                                          MonitorThread,
-                                          NULL,
-                                          0,
-                                          NULL);
-
-    if (Context->MonitorThread == INVALID_HANDLE_VALUE)
+    if (Type != REG_SZ) {
+        SetLastError(ERROR_BAD_FORMAT);
         goto fail5;
+    }
 
-    Context->DeviceEvent = CreateEvent(NULL,
-                                       TRUE,
-                                       FALSE,
-                                       NULL);
+    Log("%s = %s", DeviceName, *Executable);
 
-    if (Context->DeviceEvent == NULL)
-        goto fail6;
+    RegCloseKey(Key);
 
-    Context->DeviceThread = CreateThread(NULL,
-                                         0,
-                                         DeviceThread,
-                                         NULL,
-                                         0,
-                                         NULL);
-
-    if (Context->DeviceThread == INVALID_HANDLE_VALUE)
-        goto fail7;
-
-    Context->ServerEvent = CreateEvent(NULL,
-                                       TRUE,
-                                       FALSE,
-                                       NULL);
-    if (Context->ServerEvent == NULL)
-        goto fail8;
-
-    Context->ServerThread = CreateThread(NULL,
-                                         0,
-                                         ServerThread,
-                                         NULL,
-                                         0,
-                                         NULL);
-    if (Context->ServerThread == INVALID_HANDLE_VALUE)
-        goto fail9;
-
-    Log("<====");
-
-    return;
-
-fail9:
-    Log("fail9");
-
-    CloseHandle(Context->ServerEvent);
-    Context->ServerEvent = NULL;
-
-fail8:
-    Log("fail8");
-
-    SetEvent(Context->DeviceEvent);
-    WaitForSingleObject(Context->DeviceThread, INFINITE);
-
-fail7:
-    Log("fail7\n");
-
-    CloseHandle(Context->DeviceEvent);
-    Context->DeviceEvent = NULL;
-
-fail6:
-    Log("fail6\n");
-
-    SetEvent(Context->MonitorThread);
-    WaitForSingleObject(Context->MonitorThread, INFINITE);
+    return TRUE;
 
 fail5:
     Log("fail5");
 
-    CloseHandle(Context->MonitorEvent);
-    Context->MonitorEvent = NULL;
-
 fail4:
     Log("fail4");
 
-    DeleteCriticalSection(&Context->CriticalSection);
-    ZeroMemory(&Context->ListHead, sizeof(LIST_ENTRY));
-
-    free(Context->DevicePath);
-    Context->DevicePath = NULL;
-
-    UnregisterDeviceNotification(Context->DeviceNotification);
-    Context->DeviceNotification = NULL;
+    free(*Executable);
 
 fail3:
     Log("fail3");
 
-    CloseHandle(Context->Device);
-    Context->Device = INVALID_HANDLE_VALUE;
-
 fail2:
     Log("fail2");
 
-    free(Path);
+    RegCloseKey(Key);
 
 fail1:
     Error = GetLastError();
@@ -984,104 +734,615 @@ fail1:
         Log("fail1 (%s)", Message);
         LocalFree(Message);
     }
+
+    return FALSE;
 }
 
-static VOID
-MonitorWaitForPipeThreads(
-    VOID
+DWORD WINAPI
+ExecutableThread(
+    IN  LPVOID          Argument
     )
 {
-    PMONITOR_CONTEXT    Context = &MonitorContext;
-    HANDLE              *Handles;
-    DWORD               Index;
-    PLIST_ENTRY         ListEntry;
+    PMONITOR_CONSOLE    Console = (PMONITOR_CONSOLE)Argument;
+    PCHAR               Executable;
+    PROCESS_INFORMATION ProcessInfo;
+    STARTUPINFO         StartupInfo;
+    BOOL                Success;
+    HANDLE              Handle[2];
+    DWORD               Object;
+    HRESULT             Error;
 
-    EnterCriticalSection(&Context->CriticalSection);
+    Log("====> %s", Console->DeviceName);
 
-    if (Context->ListCount == 0)
+    // If there is no executable, this thread can finish now.
+    if (!GetExecutable(Console->DeviceName,
+                       &Executable))
+        goto done;
+    if (Executable == NULL)
+        goto done;
+
+again:
+    ZeroMemory(&ProcessInfo, sizeof (ProcessInfo));
+    ZeroMemory(&StartupInfo, sizeof (StartupInfo));
+    StartupInfo.cb = sizeof (StartupInfo);
+
+    Log("Executing: %s", Executable);
+
+#pragma warning(suppress:6053) // CommandLine might not be NUL-terminated
+    Success = CreateProcess(NULL,
+                            Executable,
+                            NULL,
+                            NULL,
+                            FALSE,
+                            CREATE_NO_WINDOW |
+                            CREATE_NEW_PROCESS_GROUP,
+                            NULL,
+                            NULL,
+                            &StartupInfo,
+                            &ProcessInfo);
+    if (!Success)
         goto fail1;
 
-    Handles = (HANDLE*)malloc(sizeof(HANDLE) * Context->ListCount);
-    if (Handles == NULL)
-        goto fail2;
+    Handle[0] = Console->ExecutableEvent;
+    Handle[1] = ProcessInfo.hProcess;
 
-    Index = 0;
-    for (ListEntry = Context->ListHead.Flink;
-         ListEntry != &Context->ListHead && Index < Context->ListCount;
-         ListEntry = ListEntry->Flink) {
-        PMONITOR_PIPE Pipe = CONTAINING_RECORD(ListEntry, MONITOR_PIPE, ListEntry);
-        Handles[Index++] = Pipe->Thread;
+    Object = WaitForMultipleObjects(ARRAYSIZE(Handle),
+                                    Handle,
+                                    FALSE,
+                                    INFINITE);
+
+#define WAIT_OBJECT_1 (WAIT_OBJECT_0 + 1)
+
+    switch (Object) {
+    case WAIT_OBJECT_0:
+        ResetEvent(Console->ExecutableEvent);
+
+        TerminateProcess(ProcessInfo.hProcess, 1);
+        CloseHandle(ProcessInfo.hProcess);
+        CloseHandle(ProcessInfo.hThread);
+        break;
+
+    case WAIT_OBJECT_1:
+        CloseHandle(ProcessInfo.hProcess);
+        CloseHandle(ProcessInfo.hThread);
+        goto again;
+
+    default:
+        break;
     }
 
-    Context->ListCount = 0;
+//#undef WAIT_OBJECT_1
 
-    LeaveCriticalSection(&Context->CriticalSection);
+    free(Executable);
 
-#pragma warning(suppress:6385) // Reading invalid data from 'Handles'...
-    WaitForMultipleObjects(Index,
-                           Handles,
-                           TRUE,
-                           INFINITE);
-    free(Handles);
-    return;
+done:
+    Log("<==== %s", Console->DeviceName);
+
+    return 0;
+
+fail1:
+    Error = GetLastError();
+
+    free(Executable);
+
+    {
+        PTCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return 1;
+}
+
+static PMONITOR_CONSOLE
+ConsoleCreate(
+    IN  PWCHAR              DevicePath
+    )
+{
+    PMONITOR_CONTEXT        Context = &MonitorContext;
+    PMONITOR_CONSOLE        Console;
+    DEV_BROADCAST_HANDLE    Handle;
+    CHAR                    DeviceName[MAX_PATH];
+    DWORD                   Bytes;
+    BOOL                    Success;
+    HRESULT                 Error;
+
+    Log("====> %ws", DevicePath);
+
+    Console = malloc(sizeof(MONITOR_CONSOLE));
+    if (Console == NULL)
+        goto fail1;
+
+    memset(Console, 0, sizeof(MONITOR_CONSOLE));
+    __InitializeListHead(&Console->ListHead);
+    __InitializeListHead(&Console->ListEntry);
+    InitializeCriticalSection(&Console->CriticalSection);
+
+    Console->DevicePath = _wcsdup(DevicePath);
+    if (Console->DevicePath == NULL)
+        goto fail2;
+
+    Console->DeviceHandle = CreateFileW(DevicePath,
+                                        GENERIC_READ | GENERIC_WRITE,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                        NULL,
+                                        OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL,
+                                        NULL);
+    if (Console->DeviceHandle == INVALID_HANDLE_VALUE)
+        goto fail3;
+
+    Success = DeviceIoControl(Console->DeviceHandle,
+                              IOCTL_XENCONS_GET_NAME,
+                              NULL,
+                              0,
+                              DeviceName,
+                              sizeof(DeviceName),
+                              &Bytes,
+                              NULL);
+    if (!Success)
+        goto fail4;
+
+    DeviceName[MAX_PATH - 1] = '\0';
+
+    Console->DeviceName = _strdup(DeviceName);
+    if (Console->DeviceName == NULL)
+        goto fail5;
+
+    ECHO(Console->DeviceHandle, "\r\n[ATTACHED]\r\n");
+
+    ZeroMemory(&Handle, sizeof (Handle));
+    Handle.dbch_size = sizeof (Handle);
+    Handle.dbch_devicetype = DBT_DEVTYP_HANDLE;
+    Handle.dbch_handle = Console->DeviceHandle;
+
+    Console->DeviceNotification =
+        RegisterDeviceNotification(Context->Service,
+                                    &Handle,
+                                    DEVICE_NOTIFY_SERVICE_HANDLE);
+    if (Console->DeviceNotification == NULL)
+        goto fail6;
+
+    Console->DeviceEvent = CreateEvent(NULL,
+                                       TRUE,
+                                       FALSE,
+                                       NULL);
+    if (Console->DeviceEvent == NULL)
+        goto fail7;
+
+    Console->DeviceThread = CreateThread(NULL,
+                                         0,
+                                         DeviceThread,
+                                         Console,
+                                         0,
+                                         NULL);
+    if (Console->DeviceThread == NULL)
+        goto fail8;
+
+    Console->ServerEvent = CreateEvent(NULL,
+                                       TRUE,
+                                       FALSE,
+                                       NULL);
+    if (Console->ServerEvent == NULL)
+        goto fail9;
+
+    Console->ServerThread = CreateThread(NULL,
+                                         0,
+                                         ServerThread,
+                                         Console,
+                                         0,
+                                         NULL);
+    if (Console->ServerThread == NULL)
+        goto fail10;
+
+    Console->ExecutableEvent = CreateEvent(NULL,
+                                           TRUE,
+                                           FALSE,
+                                           NULL);
+    if (Console->ExecutableEvent == NULL)
+        goto fail11;
+
+    Console->ExecutableThread = CreateThread(NULL,
+                                             0,
+                                             ExecutableThread,
+                                             Console,
+                                             0,
+                                             NULL);
+    if (Console->ExecutableThread == NULL)
+        goto fail12;
+
+    Log("<==== %s", Console->DeviceName);
+
+    return Console;
+
+fail12:
+    Log("fail12");
+
+    CloseHandle(Console->ExecutableEvent);
+    Console->ExecutableEvent = NULL;
+
+fail11:
+    Log("fail11");
+
+    SetEvent(Console->ServerEvent);
+    WaitForSingleObject(Console->ServerThread, INFINITE);
+
+fail10:
+    Log("fail10");
+
+    CloseHandle(Console->ServerEvent);
+    Console->ServerEvent = NULL;
+
+fail9:
+    Log("fail9");
+
+    SetEvent(Console->DeviceEvent);
+    WaitForSingleObject(Console->DeviceThread, INFINITE);
+
+fail8:
+    Log("fail8");
+
+    CloseHandle(Console->DeviceEvent);
+    Console->DeviceEvent = NULL;
+
+fail7:
+    Log("fail7");
+
+    UnregisterDeviceNotification(Console->DeviceNotification);
+    Console->DeviceNotification = NULL;
+
+fail6:
+    Log("fail6");
+
+    ECHO(Console->DeviceHandle, "\r\n[DETACHED]\r\n");
+
+    free(Console->DevicePath);
+    Console->DevicePath = NULL;
+
+fail5:
+    Log("fail5");
+
+fail4:
+    Log("fail4");
+
+    CloseHandle(Console->DeviceHandle);
+    Console->DeviceHandle = INVALID_HANDLE_VALUE;
+
+fail3:
+    Log("fail3");
+
+    free(Console->DevicePath);
+    Console->DevicePath = NULL;
 
 fail2:
     Log("fail2");
 
-fail1:
-    Log("fail1");
+    DeleteCriticalSection(&Console->CriticalSection);
+    ZeroMemory(&Console->ListHead, sizeof(LIST_ENTRY));
+    ZeroMemory(&Console->ListEntry, sizeof(LIST_ENTRY));
 
-    LeaveCriticalSection(&Context->CriticalSection);
+    free(Console);
+
+fail1:
+    Error = GetLastError();
+
+    {
+        PCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return NULL;
+}
+
+static FORCEINLINE VOID
+ConsoleWaitForPipes(
+    IN  PMONITOR_CONSOLE    Console
+    )
+{
+    PLIST_ENTRY             ListEntry;
+    HANDLE                  *Events;
+    DWORD                   Count;
+    DWORD                   Index;
+
+    EnterCriticalSection(&Console->CriticalSection);
+
+    Count = Console->ListCount + 1;
+    Events = malloc(Count * sizeof(HANDLE));
+    if (Events == NULL)
+        goto fail1;
+
+    Index = 0;
+    for (ListEntry = Console->ListHead.Flink;
+         ListEntry != &Console->ListHead;
+         ListEntry = ListEntry->Flink) {
+        PMONITOR_CONNECTION Connection;
+
+        Connection = CONTAINING_RECORD(ListEntry,
+                                       MONITOR_CONNECTION,
+                                       ListEntry);
+
+#pragma warning(suppress: 6386) // Buffer overflow
+        Events[Index] = Connection->Thread;
+        ++Index;
+    }
+    Events[Count - 1] = Console->ServerThread;
+
+    LeaveCriticalSection(&Console->CriticalSection);
+
+    SetEvent(Console->ServerEvent);
+    WaitForMultipleObjects(Count, Events, TRUE, INFINITE);
 
     return;
+
+fail1:
+    LeaveCriticalSection(&Console->CriticalSection);
+
+    // set the event and wait for the server thread anyway
+    SetEvent(Console->ServerEvent);
+    WaitForSingleObject(Console->ServerThread, INFINITE);
 }
 
 static VOID
+ConsoleDestroy(
+    IN  PMONITOR_CONSOLE    Console
+    )
+{
+    Log("====> %s", Console->DeviceName);
+
+    SetEvent(Console->ExecutableEvent);
+    WaitForSingleObject(Console->ExecutableThread, INFINITE);
+
+    CloseHandle(Console->ExecutableEvent);
+    Console->ExecutableEvent = NULL;
+
+    ConsoleWaitForPipes(Console);
+
+    CloseHandle(Console->ServerEvent);
+    Console->ServerEvent = NULL;
+
+    SetEvent(Console->DeviceEvent);
+    WaitForSingleObject(Console->DeviceThread, INFINITE);
+
+    CloseHandle(Console->DeviceEvent);
+    Console->DeviceEvent = NULL;
+
+    UnregisterDeviceNotification(Console->DeviceNotification);
+    Console->DeviceNotification = NULL;
+
+    ECHO(Console->DeviceHandle, "\r\n[DETACHED]\r\n");
+
+    free(Console->DevicePath);
+    Console->DevicePath = NULL;
+
+    CloseHandle(Console->DeviceHandle);
+    Console->DeviceHandle = INVALID_HANDLE_VALUE;
+
+    free(Console->DevicePath);
+    Console->DevicePath = NULL;
+
+    DeleteCriticalSection(&Console->CriticalSection);
+    ZeroMemory(&Console->ListHead, sizeof(LIST_ENTRY));
+    ZeroMemory(&Console->ListEntry, sizeof(LIST_ENTRY));
+
+    free(Console);
+
+    Log("<====");
+}
+
+static BOOL
+MonitorAdd(
+    IN  PWCHAR          DevicePath
+    )
+{
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    PMONITOR_CONSOLE    Console;
+
+    Log("=====> %ws", DevicePath);
+
+    Console = ConsoleCreate(DevicePath);
+    if (Console == NULL)
+        goto fail1;
+
+    EnterCriticalSection(&Context->CriticalSection);
+    __InsertTailList(&Context->ListHead, &Console->ListEntry);
+    ++Context->ListCount;
+    LeaveCriticalSection(&Context->CriticalSection);
+
+    Log("<===== %s", Console->DeviceName);
+
+    return TRUE;
+
+fail1:
+    Log("fail1");
+
+    return FALSE;
+}
+
+static BOOL
 MonitorRemove(
+    IN  HANDLE          DeviceHandle
+    )
+{
+    PMONITOR_CONTEXT    Context = &MonitorContext;
+    PMONITOR_CONSOLE    Console;
+    PLIST_ENTRY         ListEntry;
+
+    Log("=====> 0x%p", DeviceHandle);
+
+    EnterCriticalSection(&Context->CriticalSection);
+    for (ListEntry = Context->ListHead.Flink;
+         ListEntry != &Context->ListHead;
+         ListEntry = ListEntry->Flink) {
+        Console = CONTAINING_RECORD(ListEntry,
+                                    MONITOR_CONSOLE,
+                                    ListEntry);
+
+        if (Console->DeviceHandle == DeviceHandle)
+            goto found;
+    }
+    LeaveCriticalSection(&Context->CriticalSection);
+
+    Log("DeviceHandle 0x%p not found", DeviceHandle);
+
+    return FALSE;
+
+found:
+    __RemoveEntryList(&Console->ListEntry);
+    --Context->ListCount;
+    LeaveCriticalSection(&Context->CriticalSection);
+
+    ConsoleDestroy(Console);
+
+    Log("<=====");
+
+    return TRUE;
+}
+
+static BOOL
+MonitorEnumerate(
+    VOID
+    )
+{
+    PMONITOR_CONTEXT                    Context = &MonitorContext;
+    HDEVINFO                            DeviceInfoSet;
+    SP_DEVICE_INTERFACE_DATA            DeviceInterfaceData;
+    PSP_DEVICE_INTERFACE_DETAIL_DATA_W  DeviceInterfaceDetail;
+    PMONITOR_CONSOLE                    Console;
+    DWORD                               Size;
+    DWORD                               Index;
+    HRESULT                             Error;
+    BOOL                                Success;
+
+    Log("====>");
+
+    DeviceInfoSet = SetupDiGetClassDevs(&GUID_XENCONS_DEVICE,
+                                        NULL,
+                                        NULL,
+                                        DIGCF_PRESENT |
+                                        DIGCF_DEVICEINTERFACE);
+    if (DeviceInfoSet == INVALID_HANDLE_VALUE)
+        goto fail1;
+
+    DeviceInterfaceData.cbSize = sizeof (SP_DEVICE_INTERFACE_DATA);
+
+    for (Index = 0; TRUE; ++Index) {
+        Success = SetupDiEnumDeviceInterfaces(DeviceInfoSet,
+                                              NULL,
+                                              &GUID_XENCONS_DEVICE,
+                                              Index,
+                                              &DeviceInterfaceData);
+        if (!Success)
+            break;
+
+        Success = SetupDiGetDeviceInterfaceDetailW(DeviceInfoSet,
+                                                  &DeviceInterfaceData,
+                                                  NULL,
+                                                  0,
+                                                  &Size,
+                                                  NULL);
+        if (!Success && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+            goto fail2;
+
+        DeviceInterfaceDetail = calloc(1, Size);
+        if (DeviceInterfaceDetail == NULL)
+            goto fail3;
+
+        DeviceInterfaceDetail->cbSize =
+            sizeof (SP_DEVICE_INTERFACE_DETAIL_DATA_W);
+
+        Success = SetupDiGetDeviceInterfaceDetailW(DeviceInfoSet,
+                                                   &DeviceInterfaceData,
+                                                   DeviceInterfaceDetail,
+                                                   Size,
+                                                   NULL,
+                                                   NULL);
+        if (!Success)
+            goto fail4;
+
+        Console = ConsoleCreate(DeviceInterfaceDetail->DevicePath);
+        if (Console == NULL)
+            goto fail5;
+
+        EnterCriticalSection(&Context->CriticalSection);
+        __InsertTailList(&Context->ListHead, &Console->ListEntry);
+        ++Context->ListCount;
+        LeaveCriticalSection(&Context->CriticalSection);
+
+        free(DeviceInterfaceDetail);
+
+        continue;
+
+    fail5:
+        Log("fail5");
+    fail4:
+        Log("fail4");
+
+        free(DeviceInterfaceDetail);
+
+    fail3:
+        Log("fail3");
+    fail2:
+        Error = GetLastError();
+
+        {
+            PCHAR  Message;
+            Message = GetErrorMessage(Error);
+            Log("fail2 (%s)", Message);
+            LocalFree(Message);
+        }
+    }
+
+    SetupDiDestroyDeviceInfoList(DeviceInfoSet);
+
+    Log("<====");
+
+    return TRUE;
+
+fail1:
+    Error = GetLastError();
+
+    {
+        PCHAR  Message;
+        Message = GetErrorMessage(Error);
+        Log("fail1 (%s)", Message);
+        LocalFree(Message);
+    }
+
+    return FALSE;
+}
+
+static VOID
+MonitorRemoveAll(
     VOID
     )
 {
     PMONITOR_CONTEXT    Context = &MonitorContext;
+    PMONITOR_CONSOLE    Console;
 
-    if (Context->Device == INVALID_HANDLE_VALUE)
-        return;
+    Log("=====>");
 
-    Log("====>");
+    for (;;) {
+        EnterCriticalSection(&Context->CriticalSection);
+        if (Context->ListHead.Flink == &Context->ListHead)
+            break;
 
-    SetEvent(Context->ServerEvent);
-    MonitorWaitForPipeThreads();
-    WaitForSingleObject(Context->ServerThread, INFINITE);
+        Console = CONTAINING_RECORD(Context->ListHead.Flink,
+                                    MONITOR_CONSOLE,
+                                    ListEntry);
 
-    CloseHandle(Context->ServerEvent);
-    Context->ServerEvent = NULL;
+        __RemoveEntryList(&Console->ListEntry);
+        --Context->ListCount;
 
-    SetEvent(Context->DeviceEvent);
-    WaitForSingleObject(Context->DeviceThread, INFINITE);
+        LeaveCriticalSection(&Context->CriticalSection);
 
-    CloseHandle(Context->DeviceEvent);
-    Context->DeviceEvent = NULL;
+        ConsoleDestroy(Console);
+    }
+    LeaveCriticalSection(&Context->CriticalSection);
 
-    SetEvent(Context->MonitorEvent);
-    WaitForSingleObject(Context->MonitorThread, INFINITE);
-
-    CloseHandle(Context->MonitorEvent);
-    Context->MonitorEvent = NULL;
-
-    DeleteCriticalSection(&Context->CriticalSection);
-    ZeroMemory(&Context->ListHead, sizeof(LIST_ENTRY));
-
-    free(Context->DevicePath);
-    Context->DevicePath = NULL;
-
-    UnregisterDeviceNotification(Context->DeviceNotification);
-    Context->DeviceNotification = NULL;
-
-    ECHO(Context->Device, "\r\n[DETACHED]\r\n");
-
-    CloseHandle(Context->Device);
-    Context->Device = INVALID_HANDLE_VALUE;
-
-    Log("<====");
+    Log("<=====");
 }
 
 DWORD WINAPI
@@ -1113,11 +1374,11 @@ MonitorCtrlHandlerEx(
         switch (EventType) {
         case DBT_DEVICEARRIVAL:
             if (Header->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
-                PDEV_BROADCAST_DEVICEINTERFACE  Interface = EventData;
+                PDEV_BROADCAST_DEVICEINTERFACE_W Interface = EventData;
 
                 if (IsEqualGUID(&Interface->dbcc_classguid,
-                               &GUID_XENCONS_DEVICE))
-                    SetEvent(Context->AddEvent);
+                                &GUID_XENCONS_DEVICE))
+                    MonitorAdd(Interface->dbcc_name);
             }
             break;
 
@@ -1127,8 +1388,7 @@ MonitorCtrlHandlerEx(
             if (Header->dbch_devicetype == DBT_DEVTYP_HANDLE) {
                 PDEV_BROADCAST_HANDLE Device = EventData;
 
-                if (Device->dbch_handle == Context->Device)
-                    SetEvent(Context->RemoveEvent);
+                MonitorRemove(Device->dbch_handle);
             }
             break;
         }
@@ -1143,84 +1403,6 @@ MonitorCtrlHandlerEx(
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-static BOOL
-GetExecutable(
-    OUT PTCHAR          *Executable
-    )
-{
-    PMONITOR_CONTEXT    Context = &MonitorContext;
-    DWORD               MaxValueLength;
-    DWORD               ExecutableLength;
-    DWORD               Type;
-    HRESULT             Error;
-
-    Error = RegQueryInfoKey(Context->ParametersKey,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            NULL,
-                            &MaxValueLength,
-                            NULL,
-                            NULL);
-    if (Error != ERROR_SUCCESS) {
-        SetLastError(Error);
-        goto fail1;
-    }
-
-    ExecutableLength = MaxValueLength + sizeof (TCHAR);
-
-    *Executable = calloc(1, ExecutableLength);
-    if (Executable == NULL)
-        goto fail2;
-
-    Error = RegQueryValueEx(Context->ParametersKey,
-                            "Executable",
-                            NULL,
-                            &Type,
-                            (LPBYTE)(*Executable),
-                            &ExecutableLength);
-    if (Error != ERROR_SUCCESS) {
-        SetLastError(Error);
-        goto fail3;
-    }
-
-    if (Type != REG_SZ) {
-        SetLastError(ERROR_BAD_FORMAT);
-        goto fail4;
-    }
-
-    Log("%s", *Executable);
-
-    return TRUE;
-
-fail4:
-    Log("fail4");
-
-fail3:
-    Log("fail3");
-
-    free(*Executable);
-
-fail2:
-    Log("fail2");
-
-fail1:
-    Error = GetLastError();
-
-    {
-        PTCHAR  Message;
-        Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
-        LocalFree(Message);
-    }
-
-    return FALSE;
-}
-
 VOID WINAPI
 MonitorMain(
     _In_    DWORD                   argc,
@@ -1230,14 +1412,13 @@ MonitorMain(
     PMONITOR_CONTEXT                Context = &MonitorContext;
     DEV_BROADCAST_DEVICEINTERFACE   Interface;
     HRESULT                         Error;
-    BOOL                            Success;
 
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
 
     Log("====>");
 
-    Error = RegOpenKeyEx(HKEY_LOCAL_MACHINE,
+    Error = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
                          PARAMETERS_KEY(__MODULE__),
                          0,
                          KEY_READ,
@@ -1245,13 +1426,13 @@ MonitorMain(
     if (Error != ERROR_SUCCESS)
         goto fail1;
 
-    Context->Service = RegisterServiceCtrlHandlerEx(MONITOR_NAME,
+    Context->Service = RegisterServiceCtrlHandlerExA(MONITOR_NAME,
                                                     MonitorCtrlHandlerEx,
                                                     NULL);
     if (Context->Service == NULL)
         goto fail2;
 
-    Context->EventLog = RegisterEventSource(NULL,
+    Context->EventLog = RegisterEventSourceA(NULL,
                                             MONITOR_NAME);
     if (Context->EventLog == NULL)
         goto fail3;
@@ -1269,28 +1450,6 @@ MonitorMain(
     if (Context->StopEvent == NULL)
         goto fail4;
 
-    Context->AddEvent = CreateEvent(NULL,
-                                    TRUE,
-                                    FALSE,
-                                    NULL);
-
-    if (Context->AddEvent == NULL)
-        goto fail5;
-
-    Context->RemoveEvent = CreateEvent(NULL,
-                                       TRUE,
-                                       FALSE,
-                                       NULL);
-
-    if (Context->RemoveEvent == NULL)
-        goto fail6;
-
-    Success = GetExecutable(&Context->Executable);
-    if (!Success)
-        Context->Executable = NULL;
-
-    Context->Device = INVALID_HANDLE_VALUE;
-
     ZeroMemory(&Interface, sizeof (Interface));
     Interface.dbcc_size = sizeof (Interface);
     Interface.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
@@ -1301,63 +1460,25 @@ MonitorMain(
                                    &Interface,
                                    DEVICE_NOTIFY_SERVICE_HANDLE);
     if (Context->InterfaceNotification == NULL)
-        goto fail7;
-
-    // The device may already by present
-    SetEvent(Context->AddEvent);
+        goto fail5;
 
     ReportStatus(SERVICE_RUNNING, NO_ERROR, 0);
 
-    for (;;) {
-        HANDLE  Events[3];
-        DWORD   Object;
+    __InitializeListHead(&Context->ListHead);
+    InitializeCriticalSection(&Context->CriticalSection);
 
-        Events[0] = Context->StopEvent;
-        Events[1] = Context->AddEvent;
-        Events[2] = Context->RemoveEvent;
+    MonitorEnumerate();
 
-        Log("waiting (%u)...", ARRAYSIZE(Events));
-        Object = WaitForMultipleObjects(ARRAYSIZE(Events),
-                                        Events,
-                                        FALSE,
-                                        INFINITE);
-        Log("awake");
+    Log("Waiting...");
+    WaitForSingleObject(Context->StopEvent, INFINITE);
+    Log("Wait Complete");
 
-#define WAIT_OBJECT_1 (WAIT_OBJECT_0 + 1)
-#define WAIT_OBJECT_2 (WAIT_OBJECT_0 + 2)
+    MonitorRemoveAll();
 
-        switch (Object) {
-        case WAIT_OBJECT_0:
-            ResetEvent(Context->StopEvent);
-            goto done;
-
-        case WAIT_OBJECT_1:
-            ResetEvent(Context->AddEvent);
-            MonitorAdd();
-            break;
-
-        case WAIT_OBJECT_2:
-            ResetEvent(Context->RemoveEvent);
-            MonitorRemove();
-
-        default:
-            break;
-        }
-
-#undef WAIT_OBJECT_1
-#undef WAIT_OBJECT_2
-    }
-
-done:
-    MonitorRemove();
+    DeleteCriticalSection(&Context->CriticalSection);
+    ZeroMemory(&Context->ListHead, sizeof(LIST_ENTRY));
 
     UnregisterDeviceNotification(Context->InterfaceNotification);
-
-    free(Context->Executable);
-
-    CloseHandle(Context->RemoveEvent);
-
-    CloseHandle(Context->AddEvent);
 
     CloseHandle(Context->StopEvent);
 
@@ -1370,16 +1491,6 @@ done:
     Log("<====");
 
     return;
-
-fail7:
-    Log("fail7");
-
-    CloseHandle(Context->RemoveEvent);
-
-fail6:
-    Log("fail6");
-
-    CloseHandle(Context->AddEvent);
 
 fail5:
     Log("fail5");
@@ -1419,12 +1530,12 @@ MonitorCreate(
 {
     SC_HANDLE   SCManager;
     SC_HANDLE   Service;
-    TCHAR       Path[MAX_PATH];
+    CHAR        Path[MAX_PATH];
     HRESULT     Error;
 
     Log("====>");
 
-    if(!GetModuleFileName(NULL, Path, MAX_PATH))
+    if(!GetModuleFileNameA(NULL, Path, MAX_PATH))
         goto fail1;
 
     SCManager = OpenSCManager(NULL,
@@ -1589,7 +1700,7 @@ fail1:
 }
 
 int CALLBACK
-_tWinMain(
+WinMain(
     _In_        HINSTANCE   Current,
     _In_opt_    HINSTANCE   Previous,
     _In_        LPSTR       CmdLine,
@@ -1602,10 +1713,10 @@ _tWinMain(
     UNREFERENCED_PARAMETER(Previous);
     UNREFERENCED_PARAMETER(CmdShow);
 
-    if (_tcslen(CmdLine) != 0) {
-         if (_tcsicmp(CmdLine, TEXT("create")) == 0)
+    if (strlen(CmdLine) != 0) {
+         if (_stricmp(CmdLine, "create") == 0)
              Success = MonitorCreate();
-         else if (_tcsicmp(CmdLine, TEXT("delete")) == 0)
+         else if (_stricmp(CmdLine, "delete") == 0)
              Success = MonitorDelete();
          else
              Success = FALSE;
