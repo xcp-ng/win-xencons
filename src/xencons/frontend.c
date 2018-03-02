@@ -652,6 +652,12 @@ FrontendPrepare(
         case XenbusStateClosed:
             FrontendSetXenbusState(Frontend,
                                    XenbusStateClosed);
+            // There is currently a bug in the backend.
+            // Once the backend reaches Closed, it will crash the
+            // frontend attempts to make any state transition.
+            // Avoid the bug by forcing the frontend offline and
+            // failing FrontendPrepare
+            FrontendSetOffline(Frontend);
             break;
         default:
             FrontendSetXenbusState(Frontend,
