@@ -44,6 +44,7 @@
 
 #include "driver.h"
 #include "frontend.h"
+#include "ring.h"
 #include "thread.h"
 #include "dbg_print.h"
 #include "assert.h"
@@ -82,6 +83,8 @@ struct _XENCONS_FRONTEND {
     PXENBUS_SUSPEND_CALLBACK    SuspendCallback;
     PXENBUS_DEBUG_CALLBACK      DebugCallback;
     PXENBUS_STORE_WATCH         Watch;
+
+    PXENCONS_RING               Ring;
 };
 
 static const PCHAR
@@ -592,11 +595,21 @@ FrontendClose(
         if (!FrontendIsOnline(Frontend))
             break;
 
-        FrontendSetXenbusState(Frontend,
-                               XenbusStateClosed);
-
         FrontendWaitForBackendXenbusStateChange(Frontend,
                                                 &State);
+
+        switch (State) {
+        case XenbusStateClosing:
+            FrontendSetXenbusState(Frontend,
+                                    XenbusStateClosed);
+            break;
+        case XenbusStateClosed:
+            break;
+        default:
+            FrontendSetXenbusState(Frontend,
+                                   XenbusStateClosing);
+            break;
+        }
     }
 
     FrontendReleaseBackend(Frontend);
@@ -631,11 +644,20 @@ FrontendPrepare(
         if (!FrontendIsOnline(Frontend))
             break;
 
-        FrontendSetXenbusState(Frontend,
-                               XenbusStateInitialising);
-
         FrontendWaitForBackendXenbusStateChange(Frontend,
                                                 &State);
+        switch (State) {
+        case XenbusStateInitWait:
+            break;
+        case XenbusStateClosed:
+            FrontendSetXenbusState(Frontend,
+                                   XenbusStateClosed);
+            break;
+        default:
+            FrontendSetXenbusState(Frontend,
+                                    XenbusStateInitialising);
+            break;
+        }
     }
 
     status = STATUS_UNSUCCESSFUL;
@@ -725,7 +747,9 @@ FrontendConnect(
     if (!NT_SUCCESS(status))
         goto fail2;
 
-    // TODO: Connect Ring
+    status = RingConnect(Frontend->Ring);
+    if (!NT_SUCCESS(status))
+        goto fail3;
 
     Attempt = 0;
     do {
@@ -737,7 +761,10 @@ FrontendConnect(
         if (!NT_SUCCESS(status))
             break;
 
-        // TODO: StoreWrite Ring
+        status = RingStoreWrite(Frontend->Ring,
+                                Transaction);
+        if (!NT_SUCCESS(status))
+            goto abort;
 
         status = XENBUS_STORE(TransactionEnd,
                               &Frontend->StoreInterface,
@@ -748,12 +775,12 @@ FrontendConnect(
 
         continue;
 
-    //abort:
-    //    (VOID)XENBUS_STORE(TransactionEnd,
-    //                       &Frontend->StoreInterface,
-    //                       Transaction,
-    //                       FALSE);
-    //    break;
+    abort:
+        (VOID)XENBUS_STORE(TransactionEnd,
+                           &Frontend->StoreInterface,
+                           Transaction,
+                           FALSE);
+        break;
     } while (status == STATUS_RETRY);
 
     if (!NT_SUCCESS(status))
@@ -764,11 +791,24 @@ FrontendConnect(
         if (!FrontendIsOnline(Frontend))
             break;
 
-        FrontendSetXenbusState(Frontend,
-                               XenbusStateConnected);
-
         FrontendWaitForBackendXenbusStateChange(Frontend,
                                                 &State);
+
+        switch (State) {
+        case XenbusStateInitWait:
+            FrontendSetXenbusState(Frontend,
+                                   XenbusStateConnected);
+            break;
+        case XenbusStateConnected:
+            break;
+        case XenbusStateUnknown:
+        case XenbusStateClosing:
+        case XenbusStateClosed:
+            FrontendSetOffline(Frontend);
+            break;
+        default:
+            break;
+        }
     }
 
     status = STATUS_UNSUCCESSFUL;
@@ -784,7 +824,7 @@ FrontendConnect(
     if (NT_SUCCESS(status)) {
         Length = (ULONG)strlen(Buffer);
 
-        Frontend->Name = __FrontendAllocate(Length);
+        Frontend->Name = __FrontendAllocate(Length + 1);
         if (Frontend->Name)
             RtlCopyMemory(Frontend->Name, Buffer, Length);
 
@@ -802,7 +842,7 @@ FrontendConnect(
     if (NT_SUCCESS(status)) {
         Length = (ULONG)strlen(Buffer);
 
-        Frontend->Protocol = __FrontendAllocate(Length);
+        Frontend->Protocol = __FrontendAllocate(Length + 1);
         if (Frontend->Protocol)
             RtlCopyMemory(Frontend->Protocol, Buffer, Length);
 
@@ -820,11 +860,20 @@ fail5:
 fail4:
     Error("fail4\n");
 
-//fail3:
+    RingDisconnect(Frontend->Ring);
+
+fail3:
     Error("fail3\n");
+
+    XENBUS_DEBUG(Deregister,
+                 &Frontend->DebugInterface,
+                 Frontend->DebugCallback);
+    Frontend->DebugCallback = NULL;
 
 fail2:
     Error("fail2\n");
+
+    XENBUS_DEBUG(Release, &Frontend->DebugInterface);
 
 fail1:
     Error("fail1 (%08x)\n", status);
@@ -845,7 +894,7 @@ FrontendDisconnect(
     __FrontendFree(Frontend->Name);
     Frontend->Name = NULL;
 
-    // TODO: Disconnect Ring
+    RingDisconnect(Frontend->Ring);
 
     XENBUS_DEBUG(Deregister,
                  &Frontend->DebugInterface,
@@ -862,14 +911,22 @@ FrontendEnable(
     IN  PXENCONS_FRONTEND    Frontend
     )
 {
+    NTSTATUS                status;
+
     Trace("====>\n");
 
-    UNREFERENCED_PARAMETER(Frontend);
-    // TODO: Enable Ring
+    status = RingEnable(Frontend->Ring);
+    if (!NT_SUCCESS(status))
+        goto fail1;
 
     Trace("<====\n");
 
     return STATUS_SUCCESS;
+
+fail1:
+    Error("fail1 (%08x)\n", status);
+
+    return status;
 }
 
 static VOID
@@ -879,8 +936,7 @@ FrontendDisable(
 {
     Trace("====>\n");
 
-    UNREFERENCED_PARAMETER(Frontend);
-    // TODO: Disable Ring
+    RingDisable(Frontend->Ring);
 
     Trace("<====\n");
 }
@@ -1048,6 +1104,7 @@ __FrontendResume(
 
     ASSERT3U(Frontend->State, == , FRONTEND_UNKNOWN);
     UNREFERENCED_PARAMETER(Frontend);
+    // Current backends dont like re-opening after being closed
     //(VOID)FrontendSetState(Frontend, FRONTEND_CLOSED);
 }
 
@@ -1059,7 +1116,7 @@ __FrontendSuspend(
     ASSERT3U(KeGetCurrentIrql(), == , DISPATCH_LEVEL);
 
     UNREFERENCED_PARAMETER(Frontend);
-    //(VOID)FrontendSetState(Frontend, FRONTEND_UNKNOWN);
+    (VOID)FrontendSetState(Frontend, FRONTEND_UNKNOWN);
 }
 
 static DECLSPEC_NOINLINE VOID
@@ -1371,10 +1428,9 @@ FrontendAbiOpen(
     IN  PFILE_OBJECT                    FileObject
     )
 {
-    UNREFERENCED_PARAMETER(Context);
-    UNREFERENCED_PARAMETER(FileObject);
+    PXENCONS_FRONTEND                   Frontend = (PXENCONS_FRONTEND)Context;
 
-    return STATUS_SUCCESS;
+    return RingOpen(Frontend->Ring, FileObject);
 }
 
 static NTSTATUS
@@ -1383,10 +1439,9 @@ FrontendAbiClose(
     IN  PFILE_OBJECT                    FileObject
     )
 {
-    UNREFERENCED_PARAMETER(Context);
-    UNREFERENCED_PARAMETER(FileObject);
+    PXENCONS_FRONTEND                   Frontend = (PXENCONS_FRONTEND)Context;
 
-    return STATUS_SUCCESS;
+    return RingClose(Frontend->Ring, FileObject);
 }
 
 static NTSTATUS
@@ -1403,7 +1458,7 @@ FrontendAbiPutQueue(
     switch (StackLocation->MajorFunction) {
     case IRP_MJ_READ:
     case IRP_MJ_WRITE:
-        return STATUS_DEVICE_NOT_READY;
+        return RingPutQueue(Frontend->Ring, Irp);
 
     case IRP_MJ_DEVICE_CONTROL:
         return FrontendGetProperty(Frontend, Irp);
@@ -1472,7 +1527,9 @@ FrontendCreate(
     FdoGetSuspendInterface(PdoGetFdo(Pdo), &Frontend->SuspendInterface);
     FdoGetStoreInterface(PdoGetFdo(Pdo), &Frontend->StoreInterface);
 
-    // TODO: Initialize Ring
+    status = RingCreate(Frontend, &Frontend->Ring);
+    if (!NT_SUCCESS(status))
+        goto fail4;
 
     KeInitializeEvent(&Frontend->EjectEvent, NotificationEvent, FALSE);
 
@@ -1491,9 +1548,10 @@ fail5:
 
     RtlZeroMemory(&Frontend->EjectEvent, sizeof(KEVENT));
 
-    // TODO: Teardown Ring
+    RingDestroy(Frontend->Ring);
+    Frontend->Ring = NULL;
 
-//fail4:
+fail4:
     Error("fail4\n");
 
     RtlZeroMemory(&Frontend->StoreInterface,
@@ -1560,7 +1618,8 @@ FrontendDestroy(
 
     RtlZeroMemory(&Frontend->EjectEvent, sizeof(KEVENT));
 
-    // TODO: Teardown Ring
+    RingDestroy(Frontend->Ring);
+    Frontend->Ring = NULL;
 
     RtlZeroMemory(&Frontend->StoreInterface,
                   sizeof(XENBUS_STORE_INTERFACE));

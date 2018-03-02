@@ -79,6 +79,7 @@
     <ClCompile Include="../../src/xencons/console.c" />
     <ClCompile Include="../../src/xencons/stream.c" />
     <ClCompile Include="../../src/xencons/frontend.c" />
+    <ClCompile Include="../../src/xencons/ring.c" />
     <ClCompile Include="../../src/xencons/thread.c" />
   </ItemGroup>
   <ItemGroup>
