@@ -1169,6 +1169,80 @@ FrontendSuspend(
 }
 
 static NTSTATUS
+FrontendGetProperty(
+    IN  PXENCONS_FRONTEND   Frontend,
+    IN  PIRP                Irp
+    )
+{
+    PIO_STACK_LOCATION      StackLocation;
+    ULONG                   IoControlCode;
+    ULONG                   InputBufferLength;
+    ULONG                   OutputBufferLength;
+    PVOID                   Buffer;
+    PCHAR                   Value;
+    ULONG                   Length;
+    NTSTATUS                status;
+
+    StackLocation = IoGetCurrentIrpStackLocation(Irp);
+    IoControlCode = StackLocation->Parameters.DeviceIoControl.IoControlCode;
+    InputBufferLength = StackLocation->Parameters.DeviceIoControl.InputBufferLength;
+    OutputBufferLength = StackLocation->Parameters.DeviceIoControl.OutputBufferLength;
+    Buffer = Irp->AssociatedIrp.SystemBuffer;
+
+    switch (IoControlCode) {
+    case IOCTL_XENCONS_GET_INSTANCE:
+        Value = PdoGetName(Frontend->Pdo);
+        break;
+    case IOCTL_XENCONS_GET_NAME:
+        Value = Frontend->Name;
+        break;
+    case IOCTL_XENCONS_GET_PROTOCOL:
+        Value = Frontend->Protocol;
+        break;
+    default:
+        Value = NULL;
+        break;
+    }
+
+    status = STATUS_NOT_SUPPORTED;
+    if (Value == NULL)
+        goto fail1;
+
+    status = STATUS_INVALID_PARAMETER;
+    if (InputBufferLength != 0)
+        goto fail2;
+
+    Length = (ULONG)strlen(Value) + 1;
+    Irp->IoStatus.Information = Length;
+
+    status = STATUS_INVALID_BUFFER_SIZE;
+    if (OutputBufferLength == 0)
+        goto fail3;
+
+    RtlZeroMemory(Buffer, OutputBufferLength);
+    if (OutputBufferLength < Length)
+        goto fail4;
+
+    RtlCopyMemory(Buffer, Value, Length);
+
+    return STATUS_SUCCESS;
+
+fail4:
+    Error("fail4\n");
+
+fail3:
+    Error("fail3\n");
+
+fail2:
+    Error("fail2\n");
+
+fail1:
+    Error("fail1 (%08x)\n", status);
+
+    return status;
+}
+
+static NTSTATUS
 FrontendAbiAcquire(
     IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
     )
@@ -1321,10 +1395,23 @@ FrontendAbiPutQueue(
     IN  PIRP                            Irp
     )
 {
-    UNREFERENCED_PARAMETER(Context);
-    UNREFERENCED_PARAMETER(Irp);
+    PXENCONS_FRONTEND                   Frontend = (PXENCONS_FRONTEND)Context;
+    PIO_STACK_LOCATION                  StackLocation;
 
-    return STATUS_DEVICE_NOT_READY;
+    StackLocation = IoGetCurrentIrpStackLocation(Irp);
+
+    switch (StackLocation->MajorFunction) {
+    case IRP_MJ_READ:
+    case IRP_MJ_WRITE:
+        return STATUS_DEVICE_NOT_READY;
+
+    case IRP_MJ_DEVICE_CONTROL:
+        return FrontendGetProperty(Frontend, Irp);
+
+    default:
+        ASSERT(FALSE);
+        return STATUS_NOT_SUPPORTED;
+    }
 }
 
 static XENCONS_CONSOLE_ABI FrontendAbi = {
