@@ -46,6 +46,7 @@
 #include "pdo.h"
 #include "console_abi.h"
 #include "console.h"
+#include "frontend.h"
 #include "thread.h"
 #include "dbg_print.h"
 #include "assert.h"
@@ -477,7 +478,6 @@ PdoD3ToD0(
 
     KeLowerIrql(Irql);
 
-    ASSERT(__PdoIsDefault(Pdo));
     status = XENCONS_CONSOLE_ABI(D3ToD0, &Pdo->Abi);
     if (!NT_SUCCESS(status))
         goto fail4;
@@ -532,7 +532,6 @@ PdoD0ToD3(
 #pragma prefast(suppress:28123)
     (VOID) IoSetDeviceInterfaceState(&Pdo->Dx->Link, FALSE);
 
-    ASSERT(__PdoIsDefault(Pdo));
     XENCONS_CONSOLE_ABI(D0ToD3, &Pdo->Abi);
 
     KeRaiseIrql(DISPATCH_LEVEL, &Irql);
@@ -1727,7 +1726,6 @@ PdoDispatchCreate(
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
-    ASSERT(__PdoIsDefault(Pdo));
     status = XENCONS_CONSOLE_ABI(Open,
                                  &Pdo->Abi,
                                  StackLocation->FileObject);
@@ -1749,7 +1747,6 @@ PdoDispatchCleanup(
 
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
 
-    ASSERT(__PdoIsDefault(Pdo));
     status = XENCONS_CONSOLE_ABI(Close,
                                  &Pdo->Abi,
                                  StackLocation->FileObject);
@@ -1786,7 +1783,6 @@ PdoDispatchReadWriteControl(
 {
     NTSTATUS            status;
 
-    ASSERT(__PdoIsDefault(Pdo));
     status = XENCONS_CONSOLE_ABI(PutQueue,
                                  &Pdo->Abi,
                                  Irp);
@@ -1873,7 +1869,6 @@ PdoResume(
 
     Trace("(%s) ====>\n", __PdoGetName(Pdo));
 
-    ASSERT(__PdoIsDefault(Pdo));
     status = XENCONS_CONSOLE_ABI(Acquire, &Pdo->Abi);
     if (!NT_SUCCESS(status))
         goto fail1;
@@ -1894,7 +1889,6 @@ PdoSuspend(
 {
     Trace("(%s) ====>\n", __PdoGetName(Pdo));
 
-    ASSERT(__PdoIsDefault(Pdo));
     XENCONS_CONSOLE_ABI(Release, &Pdo->Abi);
 
     Trace("(%s) <====\n", __PdoGetName(Pdo));
@@ -1957,13 +1951,15 @@ PdoCreate(
     __PdoSetDefault(Pdo, Device);
 
     status = __PdoIsDefault(Pdo) ?
-               ConsoleCreate(Fdo, &Pdo->Context) :
-               STATUS_NOT_SUPPORTED;
+             ConsoleCreate(Fdo, &Pdo->Context) :
+             FrontendCreate(Pdo, &Pdo->Context);
     if (!NT_SUCCESS(status))
         goto fail5;
 
     if (__PdoIsDefault(Pdo))
-      ConsoleGetAbi(Pdo->Context, &Pdo->Abi);
+        ConsoleGetAbi(Pdo->Context, &Pdo->Abi);
+    else
+        FrontendGetAbi(Pdo->Context, &Pdo->Abi);
 
     status = FdoAddPhysicalDeviceObject(Fdo, Pdo);
     if (!NT_SUCCESS(status))
@@ -1991,10 +1987,12 @@ fail6:
 
     (VOID)__PdoClearEjectRequested(Pdo);
 
-    if (__PdoIsDefault(Pdo)) {
-        RtlZeroMemory(&Pdo->Abi, sizeof(XENCONS_CONSOLE_ABI));
+    RtlZeroMemory(&Pdo->Abi, sizeof(XENCONS_CONSOLE_ABI));
+
+    if (__PdoIsDefault(Pdo))
         ConsoleDestroy(Pdo->Context);
-    }
+    else
+        FrontendDestroy(Pdo->Context);
 
     Pdo->IsDefault = FALSE;
 
@@ -2064,10 +2062,12 @@ PdoDestroy(
 
     Dx->Pdo = NULL;
 
-    if (__PdoIsDefault(Pdo)) {
-        RtlZeroMemory(&Pdo->Abi, sizeof(XENCONS_CONSOLE_ABI));
+    RtlZeroMemory(&Pdo->Abi, sizeof(XENCONS_CONSOLE_ABI));
+
+    if (__PdoIsDefault(Pdo))
         ConsoleDestroy(Pdo->Context);
-    }
+    else
+        FrontendDestroy(Pdo->Context);
 
     Pdo->IsDefault = FALSE;
 
