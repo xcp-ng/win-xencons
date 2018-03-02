@@ -41,6 +41,8 @@
 #include <suspend_interface.h>
 #include <store_interface.h>
 #include <console_interface.h>
+#include <evtchn_interface.h>
+#include <gnttab_interface.h>
 #include <version.h>
 
 #include "driver.h"
@@ -97,6 +99,8 @@ struct _XENCONS_FDO {
     XENBUS_SUSPEND_INTERFACE    SuspendInterface;
     XENBUS_STORE_INTERFACE      StoreInterface;
     XENBUS_CONSOLE_INTERFACE    ConsoleInterface;
+    XENBUS_EVTCHN_INTERFACE     EvtchnInterface;
+    XENBUS_GNTTAB_INTERFACE     GnttabInterface;
 
     PXENBUS_SUSPEND_CALLBACK    SuspendCallbackLate;
 };
@@ -2938,6 +2942,8 @@ DEFINE_FDO_GET_INTERFACE(Debug, PXENBUS_DEBUG_INTERFACE)
 DEFINE_FDO_GET_INTERFACE(Suspend, PXENBUS_SUSPEND_INTERFACE)
 DEFINE_FDO_GET_INTERFACE(Store, PXENBUS_STORE_INTERFACE)
 DEFINE_FDO_GET_INTERFACE(Console, PXENBUS_CONSOLE_INTERFACE)
+DEFINE_FDO_GET_INTERFACE(Evtchn, PXENBUS_EVTCHN_INTERFACE)
+DEFINE_FDO_GET_INTERFACE(Gnttab, PXENBUS_GNTTAB_INTERFACE)
 
 NTSTATUS
 FdoCreate(
@@ -3040,6 +3046,24 @@ FdoCreate(
     if (!NT_SUCCESS(status))
         goto fail11;
 
+    status = FDO_QUERY_INTERFACE(Fdo,
+                                 XENBUS,
+                                 EVTCHN,
+                                 (PINTERFACE)&Fdo->EvtchnInterface,
+                                 sizeof(Fdo->EvtchnInterface),
+                                 FALSE);
+    if (!NT_SUCCESS(status))
+        goto fail12;
+
+    status = FDO_QUERY_INTERFACE(Fdo,
+                                 XENBUS,
+                                 GNTTAB,
+                                 (PINTERFACE)&Fdo->GnttabInterface,
+                                 sizeof(Fdo->GnttabInterface),
+                                 FALSE);
+    if (!NT_SUCCESS(status))
+        goto fail13;
+
     Dx->Fdo = Fdo;
 
     InitializeMutex(&Fdo->Mutex);
@@ -3052,19 +3076,31 @@ FdoCreate(
 
     status = PdoCreate(Fdo, NULL);
     if (!NT_SUCCESS(status))
-        goto fail12;
+        goto fail14;
 
     FunctionDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
     return STATUS_SUCCESS;
 
-fail12:
-    Error("fail12\n");
+fail14:
+    Error("fail14\n");
 
     Dx->Fdo = Fdo;
 
     RtlZeroMemory(&Fdo->Mutex, sizeof(MUTEX));
     RtlZeroMemory(&Dx->ListEntry, sizeof(LIST_ENTRY));
     Fdo->References = 0;
+
+    RtlZeroMemory(&Fdo->GnttabInterface,
+                  sizeof(XENBUS_GNTTAB_INTERFACE));
+
+fail13:
+    Error("fail13\n");
+
+    RtlZeroMemory(&Fdo->EvtchnInterface,
+                  sizeof(XENBUS_EVTCHN_INTERFACE));
+
+fail12:
+    Error("fail12\n");
 
     RtlZeroMemory(&Fdo->ConsoleInterface,
                   sizeof(XENBUS_CONSOLE_INTERFACE));
@@ -3156,6 +3192,12 @@ FdoDestroy(
     RtlZeroMemory(&Fdo->Mutex, sizeof(MUTEX));
 
     Dx->Fdo = NULL;
+
+    RtlZeroMemory(&Fdo->GnttabInterface,
+                  sizeof(XENBUS_GNTTAB_INTERFACE));
+
+    RtlZeroMemory(&Fdo->EvtchnInterface,
+                  sizeof(XENBUS_EVTCHN_INTERFACE));
 
     RtlZeroMemory(&Fdo->ConsoleInterface,
                   sizeof (XENBUS_CONSOLE_INTERFACE));

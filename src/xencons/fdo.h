@@ -37,6 +37,8 @@
 #include <suspend_interface.h>
 #include <store_interface.h>
 #include <console_interface.h>
+#include <evtchn_interface.h>
+#include <gnttab_interface.h>
 
 #include "driver.h"
 
@@ -100,6 +102,8 @@ DECLARE_FDO_GET_INTERFACE(Debug, PXENBUS_DEBUG_INTERFACE)
 DECLARE_FDO_GET_INTERFACE(Suspend, PXENBUS_SUSPEND_INTERFACE)
 DECLARE_FDO_GET_INTERFACE(Store, PXENBUS_STORE_INTERFACE)
 DECLARE_FDO_GET_INTERFACE(Console, PXENBUS_CONSOLE_INTERFACE)
+DECLARE_FDO_GET_INTERFACE(Evtchn, PXENBUS_EVTCHN_INTERFACE)
+DECLARE_FDO_GET_INTERFACE(Gnttab, PXENBUS_GNTTAB_INTERFACE)
 
 extern NTSTATUS
 FdoCreate(
