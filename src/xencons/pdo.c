@@ -457,6 +457,9 @@ PdoD3ToD0(
 
     ASSERT3U(KeGetCurrentIrql(), == , PASSIVE_LEVEL);
 
+    if (__PdoGetDevicePowerState(Pdo) == PowerDeviceD0)
+        goto done;
+
     KeRaiseIrql(DISPATCH_LEVEL, &Irql);
 
     status = XENBUS_SUSPEND(Acquire, &Pdo->SuspendInterface);
@@ -482,6 +485,7 @@ PdoD3ToD0(
     if (!NT_SUCCESS(status))
         goto fail4;
 
+done:
 #pragma prefast(suppress:28123)
     (VOID) IoSetDeviceInterfaceState(&Pdo->Dx->Link, TRUE);
 
@@ -532,6 +536,9 @@ PdoD0ToD3(
 #pragma prefast(suppress:28123)
     (VOID) IoSetDeviceInterfaceState(&Pdo->Dx->Link, FALSE);
 
+    if (__PdoGetDevicePowerState(Pdo) == PowerDeviceD3)
+        goto done;
+
     XENCONS_CONSOLE_ABI(D0ToD3, &Pdo->Abi);
 
     KeRaiseIrql(DISPATCH_LEVEL, &Irql);
@@ -547,6 +554,7 @@ PdoD0ToD3(
 
     KeLowerIrql(Irql);
 
+done:
     Trace("(%s) <====\n", __PdoGetName(Pdo));
 }
 
