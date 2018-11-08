@@ -34,6 +34,10 @@
 #include <strsafe.h>
 #include <userenv.h>
 
+#define stringify_literal(_text) #_text
+#define stringify(_text) stringify_literal(_text)
+#define __MODULE__ stringify(PROJECT)
+
 typedef struct _TTY_STREAM {
     HANDLE  Read;
     HANDLE  Write;
@@ -53,6 +57,46 @@ typedef struct _TTY_CONTEXT {
 } TTY_CONTEXT, *PTTY_CONTEXT;
 
 TTY_CONTEXT TtyContext;
+
+static VOID
+#pragma prefast(suppress:6262) // Function uses '1036' bytes of stack: exceeds /analyze:stacksize'1024'
+__Log(
+    IN  const CHAR      *Format,
+    IN  ...
+    )
+{
+    CHAR                Buffer[MAXIMUM_BUFFER_SIZE];
+    va_list             Arguments;
+    size_t              Length;
+    HRESULT             Result;
+
+    va_start(Arguments, Format);
+    Result = StringCchVPrintfA(Buffer,
+        MAXIMUM_BUFFER_SIZE,
+        Format,
+        Arguments);
+    va_end(Arguments);
+
+    if (Result != S_OK && Result != STRSAFE_E_INSUFFICIENT_BUFFER)
+        return;
+
+    Result = StringCchLengthA(Buffer, MAXIMUM_BUFFER_SIZE, &Length);
+    if (Result != S_OK)
+        return;
+
+    Length = __min(MAXIMUM_BUFFER_SIZE - 1, Length + 2);
+
+    __analysis_assume(Length < MAXIMUM_BUFFER_SIZE);
+    __analysis_assume(Length >= 2);
+    Buffer[Length] = '\0';
+    Buffer[Length - 1] = '\n';
+    Buffer[Length - 2] = '\r';
+
+    OutputDebugString(Buffer);
+}
+
+#define Log(_Format, ...) \
+    __Log(__MODULE__ "|" __FUNCTION__ ": " _Format, __VA_ARGS__)
 
 static BOOL
 CreateChild(
@@ -314,6 +358,8 @@ TtyIn(
 
     UNREFERENCED_PARAMETER(Argument);
 
+    Log("====>");
+
     for (;;) {
         DWORD       Read;
         CHAR        Buffer[MAXIMUM_BUFFER_SIZE];
@@ -346,6 +392,8 @@ TtyIn(
         }
     }
 
+    Log("<====");
+
     return 0;
 }
 
@@ -357,6 +405,8 @@ TtyOut(
     PTTY_CONTEXT    Context = &TtyContext;
 
     UNREFERENCED_PARAMETER(Argument);
+
+    Log("====>");
 
     for (;;) {
         DWORD       Read;
@@ -384,6 +434,8 @@ TtyOut(
             break;
     }
 
+    Log("<====");
+
     return 0;
 }
 
@@ -401,6 +453,8 @@ _tmain(
 
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
+
+    Log("====>");
 
     if (!WaitNamedPipe(PIPE_NAME, NMPWAIT_USE_DEFAULT_WAIT))
         ExitProcess(1);
@@ -510,4 +564,6 @@ _tmain(
             CloseHandle(Handle[Index]);
 
     CloseHandle(Context->ProcessInfo.hProcess);
+
+    Log("<====");
 }
