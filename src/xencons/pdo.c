@@ -2002,6 +2002,7 @@ fail6:
     else
         FrontendDestroy(Pdo->Context);
 
+    Pdo->Context = NULL;
     Pdo->IsDefault = FALSE;
 
 fail5:
@@ -2077,6 +2078,7 @@ PdoDestroy(
     else
         FrontendDestroy(Pdo->Context);
 
+    Pdo->Context = NULL;
     Pdo->IsDefault = FALSE;
 
     RtlFreeUnicodeString(&Pdo->Dx->Link);
