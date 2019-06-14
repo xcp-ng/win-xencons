@@ -65,9 +65,9 @@ xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.d
 xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,xencons_tty.exe
 
 [Manufacturer]
-%Vendor%=Inst,NT$ARCH$
+%Vendor%=Inst,NT@INF_ARCH@
 
-[Inst.NT$ARCH$]
+[Inst.NT@INF_ARCH@]
 ; DisplayName		Section		DeviceID
 ; -----------		-------		--------
 
