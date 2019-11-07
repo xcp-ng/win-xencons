@@ -52,6 +52,7 @@ typedef struct _TTY_CONTEXT {
     TTY_STREAM          Device;
     TCHAR               UserName[MAXIMUM_BUFFER_SIZE];
     HANDLE              Token;
+    HANDLE              OriginalToken;
     PROCESS_INFORMATION ProcessInfo;
 } TTY_CONTEXT, *PTTY_CONTEXT;
 
@@ -349,6 +350,73 @@ GetCredentials(
     return TRUE;
 }
 
+static BOOL
+RequestElevation(
+    VOID
+    )
+{
+    PTTY_CONTEXT            Context = &TtyContext;
+    TOKEN_ELEVATION_TYPE    Elevation;
+    DWORD                   Size;
+    TCHAR                   Buffer[MAXIMUM_BUFFER_SIZE];
+    PTCHAR                  End;
+    TOKEN_LINKED_TOKEN      LinkedToken;
+    BOOL                    Success;
+
+    Success = GetTokenInformation(Context->Token,
+                                  TokenElevationType,
+                                  &Elevation,
+                                  sizeof(Elevation),
+                                  &Size);
+    if (!Success)
+        return TRUE;
+
+    if (Elevation != TokenElevationTypeLimited)
+        return TRUE;
+
+    ECHO(&Context->Device, "\r\n");
+    ECHO(&Context->Device, "Run Elevated [yes|no]: ");
+
+    ZeroMemory(Buffer, sizeof (Buffer));
+
+    Success = GetLine(&Context->Device,
+                      Buffer,
+                      sizeof (Buffer),
+                      &Size,
+                      FALSE);
+    if (!Success)
+        return FALSE;
+
+    End = _tcschr(Buffer, TEXT('\r'));
+    if (End == NULL)
+        return FALSE;
+
+    *End = TEXT('\0');
+
+    if (_tcslen(Buffer) == 0)
+        return FALSE;
+
+    ECHO(&Context->Device, "\r\n");
+
+    if (_tcscmp(Buffer, TEXT("yes")) != 0)
+        return TRUE;
+
+    Success = GetTokenInformation(Context->Token,
+                                  TokenLinkedToken,
+                                  &LinkedToken,
+                                  sizeof(LinkedToken),
+                                  &Size);
+    if (!Success)
+        return FALSE;
+
+    Context->OriginalToken = Context->Token;
+    Context->Token = LinkedToken.LinkedToken;
+
+    ECHO(&Context->Device, "Running Elevated\r\n\r\n");
+
+    return TRUE;
+}
+
 static DWORD WINAPI
 TtyIn(
     IN  LPVOID      Argument
@@ -498,6 +566,10 @@ _tmain(
 
     ZeroMemory(Password, sizeof(Password));
 
+    if (!Success)
+        ExitProcess(1);
+
+    Success = RequestElevation();
     if (!Success)
         ExitProcess(1);
 
