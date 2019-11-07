@@ -51,7 +51,6 @@ typedef struct _TTY_CONTEXT {
     TTY_STREAM          ChildStdOut;
     TTY_STREAM          Device;
     TCHAR               UserName[MAXIMUM_BUFFER_SIZE];
-    TCHAR               Password[MAXIMUM_BUFFER_SIZE];
     HANDLE              Token;
     PROCESS_INFORMATION ProcessInfo;
 } TTY_CONTEXT, *PTTY_CONTEXT;
@@ -289,7 +288,8 @@ GetLine(
 
 static BOOL
 GetCredentials(
-    VOID
+    IN  PTCHAR      Password,
+    IN  DWORD       PasswordSize
     )
 {
     PTTY_CONTEXT    Context = &TtyContext;
@@ -330,17 +330,17 @@ GetCredentials(
 
     ECHO(&Context->Device, "Password: ");
 
-    ZeroMemory(Context->Password, sizeof (Context->Password));
+    ZeroMemory(Password, PasswordSize);
 
     Success = GetLine(&Context->Device,
-                      Context->Password,
-                      sizeof (Context->Password),
+                      Password,
+                      PasswordSize,
                       &Size,
                       TRUE);
     if (!Success)
         return FALSE;
 
-    End = _tcschr(Context->Password, TEXT('\r'));
+    End = _tcschr(Password, TEXT('\r'));
     if (End == NULL)
         return FALSE;
 
@@ -448,6 +448,7 @@ _tmain(
     PTTY_CONTEXT        Context = &TtyContext;
     SECURITY_ATTRIBUTES Attributes;
     HANDLE              Handle[3];
+    TCHAR               Password[MAXIMUM_BUFFER_SIZE];
     DWORD               Index;
     BOOL                Success;
 
@@ -484,16 +485,19 @@ _tmain(
     if (Context->Device.Write == INVALID_HANDLE_VALUE)
         ExitProcess(1);
 
-    Success = GetCredentials();
+    Success = GetCredentials(Password, sizeof(Password));
     if (!Success)
         ExitProcess(1);
 
     Success = LogonUser(Context->UserName,
                         NULL,
-                        Context->Password,
+                        Password,
                         LOGON32_LOGON_INTERACTIVE,
                         LOGON32_PROVIDER_DEFAULT,
                         &Context->Token);
+
+    ZeroMemory(Password, sizeof(Password));
+
     if (!Success)
         ExitProcess(1);
 
