@@ -709,6 +709,7 @@ RingConnect(
                            &Ring->GnttabInterface,
                            Name,
                            0,
+                           0,
                            RingAcquireLock,
                            RingReleaseLock,
                            Ring,
