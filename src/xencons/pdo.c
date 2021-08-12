@@ -809,7 +809,7 @@ PdoQueryDeviceRelations(
     if (StackLocation->Parameters.QueryDeviceRelations.Type != TargetDeviceRelation)
         goto done;
 
-    Relations = ExAllocatePoolWithTag(PagedPool, sizeof(DEVICE_RELATIONS), PDO_POOL);
+    Relations = __AllocatePoolWithTag(PagedPool, sizeof(DEVICE_RELATIONS), PDO_POOL);
 
     status = STATUS_NO_MEMORY;
     if (Relations == NULL)
@@ -927,7 +927,7 @@ PdoQueryDeviceText(
         goto done;
     }
 
-    Buffer = ExAllocatePoolWithTag(PagedPool, MAXTEXTLEN, PDO_POOL);
+    Buffer = __AllocatePoolWithTag(PagedPool, MAXTEXTLEN, PDO_POOL);
 
     status = STATUS_NO_MEMORY;
     if (Buffer == NULL)
@@ -1055,7 +1055,7 @@ PdoQueryId(
         goto done;
     }
 
-    Buffer = ExAllocatePoolWithTag(PagedPool, Id.MaximumLength, PDO_POOL);
+    Buffer = __AllocatePoolWithTag(PagedPool, Id.MaximumLength, PDO_POOL);
 
     status = STATUS_NO_MEMORY;
     if (Buffer == NULL)
@@ -1177,7 +1177,7 @@ PdoQueryBusInformation(
 
     UNREFERENCED_PARAMETER(Pdo);
 
-    Info = ExAllocatePoolWithTag(PagedPool, sizeof(PNP_BUS_INFORMATION), PDO_POOL);
+    Info = __AllocatePoolWithTag(PagedPool, sizeof(PNP_BUS_INFORMATION), PDO_POOL);
 
     status = STATUS_NO_MEMORY;
     if (Info == NULL)

@@ -1794,7 +1794,7 @@ FdoQueryDeviceRelations(
 
     Size = FIELD_OFFSET(DEVICE_RELATIONS, Objects) + (sizeof(PDEVICE_OBJECT) * __max(Count, 1));
 
-    Relations = ExAllocatePoolWithTag(PagedPool, Size, FDO_POOL);
+    Relations = __AllocatePoolWithTag(PagedPool, Size, FDO_POOL);
 
     status = STATUS_NO_MEMORY;
     if (Relations == NULL)
