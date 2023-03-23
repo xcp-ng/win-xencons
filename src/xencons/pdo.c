@@ -2103,4 +2103,3 @@ PdoDestroy(
 
     IoDeleteDevice(PhysicalDeviceObject);
 }
-
