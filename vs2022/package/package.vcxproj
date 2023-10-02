@@ -47,9 +47,6 @@
     <ProjectReference Include="..\xencons\xencons.vcxproj">
       <Project>{4674B8C2-876B-4F2A-AB71-BAC968A9B529}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\xencons_coinst\xencons_coinst.vcxproj">
-      <Project>{6CC9B8DD-A5AE-427D-8157-E91D21DD7E19}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\xencons_monitor\xencons_monitor.vcxproj">
       <Project>{8991F0A5-408B-43E0-88CC-9550D4AAE616}</Project>
     </ProjectReference>
