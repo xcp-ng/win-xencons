@@ -38,10 +38,10 @@ Provider=%Vendor%
 CatalogFile=xencons.cat
 DriverVer=@INF_DATE@,@MAJOR_VERSION@.@MINOR_VERSION@.@MICRO_VERSION@.@BUILD_NUMBER@
 DriverPackageDisplayName=%DiskDesc%
+PnpLockdown=1
 
 [DestinationDirs]
 DefaultDestDir=12
-CoInst_CopyFiles=11
 Monitor_CopyFiles=11
 Tty_CopyFiles=11
 
@@ -50,13 +50,9 @@ Tty_CopyFiles=11
 
 [SourceDisksFiles]
 xencons.sys=0,,
-xencons_coinst.dll=0,,
 xencons_monitor.exe=0,,
 xencons_monitor.dll=0,,
 xencons_tty.exe=0,,
-
-[CoInst_CopyFiles]
-xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,xencons_coinst.dll
 
 [Monitor_CopyFiles]
 xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,xencons_monitor.exe
@@ -72,9 +68,9 @@ xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,x
 ; DisplayName		Section		DeviceID
 ; -----------		-------		--------
 
-%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@@VENDOR_DEVICE_ID@&DEV_CONS&REV_09000009
-%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0001&DEV_CONS&REV_09000009
-%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0002&DEV_CONS&REV_09000009
+%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@@VENDOR_DEVICE_ID@&DEV_CONS&REV_0900000A
+%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0001&DEV_CONS&REV_0900000A
+%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0002&DEV_CONS&REV_0900000A
 
 [XenCons_Inst]
 CopyFiles=XenCons_Copyfiles
@@ -122,13 +118,6 @@ AddReg=Monitor_EventLog_AddReg
 [Monitor_EventLog_AddReg]
 HKR,,EventMessageFile,0x00020000,"%%SystemRoot%%\System32\xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll"
 HKR,,TypesSupported,0x00010001,7
-
-[XenCons_Inst.CoInstallers]
-CopyFiles=CoInst_CopyFiles
-AddReg=CoInst_AddReg
-
-[CoInst_AddReg]
-HKR,,CoInstallers32,0x00010000,"xencons_coinst_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,Entry"
 
 [Strings]
 
