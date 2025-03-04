@@ -36,6 +36,7 @@
 #include <wdmguid.h>
 #include <ntstrsafe.h>
 #include <stdlib.h>
+#include <wdmsec.h>
 
 #include <xencons_device.h>
 
@@ -286,6 +287,10 @@ __ConsoleDeviceControl(
     InputBufferLength = StackLocation->Parameters.DeviceIoControl.InputBufferLength;
     OutputBufferLength = StackLocation->Parameters.DeviceIoControl.OutputBufferLength;
     Buffer = Irp->AssociatedIrp.SystemBuffer;
+
+    status = WdmlibIoValidateDeviceIoControlAccess(Irp, FILE_READ_ACCESS);
+    if (status != STATUS_SUCCESS)
+        return status;
 
     switch (IoControlCode) {
     case IOCTL_XENCONS_GET_INSTANCE:

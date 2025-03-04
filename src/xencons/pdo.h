@@ -37,6 +37,10 @@
 
 #include "driver.h"
 
+// {50006123-0940-4C78-A54B-A43DC83164EF}
+DEFINE_GUID(GUID_XENCONS_DEVICE_CLASS, 
+    0x50006123, 0x940, 0x4c78, 0xa5, 0x4b, 0xa4, 0x3d, 0xc8, 0x31, 0x64, 0xef);
+
 extern VOID
 PdoSetDevicePnpState(
     IN  PXENCONS_PDO        Pdo,
