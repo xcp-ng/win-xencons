@@ -44,7 +44,7 @@ typedef struct _TTY_STREAM {
     HANDLE  Write;
 } TTY_STREAM, *PTTY_STREAM;
 
-#define PIPE_NAME TEXT("\\\\.\\pipe\\xencons\\default")
+#define PIPE_NAME TEXT("\\\\.\\pipe\\ProtectedPrefix\\Administrators\\xencons\\default")
 #define MAXIMUM_BUFFER_SIZE 1024
 
 typedef struct _TTY_CONTEXT {
