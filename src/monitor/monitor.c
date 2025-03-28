@@ -40,6 +40,7 @@
 #include <cfgmgr32.h>
 #include <dbt.h>
 #include <setupapi.h>
+#include <sddl.h>
 #include <malloc.h>
 #include <assert.h>
 
@@ -93,7 +94,9 @@ typedef struct _MONITOR_CONNECTION {
 
 static MONITOR_CONTEXT MonitorContext;
 
-#define PIPE_BASE_NAME "\\\\.\\pipe\\xencons\\"
+#define PIPE_BASE_NAME "\\\\.\\pipe\\ProtectedPrefix\\Administrators\\xencons\\"
+// FILE_GENERIC_ALL for SYSTEM and Builtin\Administrators, nothing for the rest
+#define PIPE_SDDL "D:(A;;FA;;;SY)(A;;FA;;;BA)"
 
 #define MAXIMUM_BUFFER_SIZE 1024
 
@@ -436,6 +439,7 @@ ServerThread(
     DWORD               Object;
     PMONITOR_CONNECTION Connection;
     HRESULT             Error;
+    SECURITY_ATTRIBUTES SecurityAttributes;
 
     Log("====> %s", Console->DeviceName);
 
@@ -460,17 +464,26 @@ ServerThread(
 
     Log("%s", PipeName);
 
+    ZeroMemory(&SecurityAttributes, sizeof(SECURITY_ATTRIBUTES));
+    SecurityAttributes.nLength = sizeof(SECURITY_ATTRIBUTES);
+    SecurityAttributes.bInheritHandle = FALSE;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorA(PIPE_SDDL,
+                                                              SDDL_REVISION_1,
+                                                              &SecurityAttributes.lpSecurityDescriptor,
+                                                              NULL))
+        goto fail3;
+
     for (;;) {
         Pipe = CreateNamedPipe(PipeName,
                                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                               PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE,
+                               PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_REJECT_REMOTE_CLIENTS,
                                PIPE_UNLIMITED_INSTANCES,
                                MAXIMUM_BUFFER_SIZE,
                                MAXIMUM_BUFFER_SIZE,
                                0,
-                               NULL);
+                               &SecurityAttributes);
         if (Pipe == INVALID_HANDLE_VALUE)
-            goto fail3;
+            goto fail4;
 
         (VOID) ConnectNamedPipe(Pipe,
                                 &Overlapped);
@@ -488,7 +501,7 @@ ServerThread(
 
         Connection = (PMONITOR_CONNECTION)malloc(sizeof(MONITOR_CONNECTION));
         if (Connection == NULL)
-            goto fail4;
+            goto fail5;
 
         __InitializeListHead(&Connection->ListEntry);
         Connection->Console = Console;
@@ -500,8 +513,10 @@ ServerThread(
                                           0,
                                           NULL);
         if (Connection->Thread == NULL)
-            goto fail5;
+            goto fail6;
     }
+
+    LocalFree(&SecurityAttributes.lpSecurityDescriptor);
 
     CloseHandle(Overlapped.hEvent);
 
@@ -509,15 +524,20 @@ ServerThread(
 
     return 0;
 
+fail6:
+    Log("fail6");
+
+    free(Connection);
+
 fail5:
     Log("fail5");
 
-    free(Connection);
+    CloseHandle(Pipe);
 
 fail4:
     Log("fail4");
 
-    CloseHandle(Pipe);
+    LocalFree(&SecurityAttributes.lpSecurityDescriptor);
 
 fail3:
     Log("fail3");
