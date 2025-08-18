@@ -1087,8 +1087,7 @@ PdoQueryId(
 
         status = RtlStringCbPrintfW(Buffer,
                                     Id.MaximumLength,
-                                    L"XENCONS\\VEN_%hs&DEV_CONSOLE",
-                                    __PdoGetVendorName(Pdo));
+                                    L"XENCONS\\VEN_" VENDOR_PREFIX_STR "&DEV_CONSOLE");
         ASSERT(NT_SUCCESS(status));
 
         Buffer += wcslen(Buffer);
