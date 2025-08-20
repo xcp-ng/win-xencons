@@ -70,7 +70,7 @@ DriverSafeMode(
 
 static FORCEINLINE VOID
 __DriverSetDriverObject(
-    IN  PDRIVER_OBJECT  DriverObject
+    _In_opt_ PDRIVER_OBJECT DriverObject
     )
 {
     Driver.DriverObject = DriverObject;
@@ -94,7 +94,7 @@ DriverGetDriverObject(
 
 static FORCEINLINE VOID
 __DriverSetParametersKey(
-    IN  HANDLE  Key
+    _In_opt_ HANDLE Key
     )
 {
     Driver.ParametersKey = Key;
@@ -120,7 +120,7 @@ DRIVER_UNLOAD       DriverUnload;
 
 VOID
 DriverUnload(
-    IN  PDRIVER_OBJECT  DriverObject
+    _In_ PDRIVER_OBJECT DriverObject
     )
 {
     HANDLE              ParametersKey;
@@ -156,8 +156,8 @@ DRIVER_ADD_DEVICE   AddDevice;
 
 NTSTATUS
 AddDevice(
-    IN  PDRIVER_OBJECT  DriverObject,
-    IN  PDEVICE_OBJECT  DeviceObject
+    _In_ PDRIVER_OBJECT DriverObject,
+    _In_ PDEVICE_OBJECT DeviceObject
     )
 {
     NTSTATUS            status;
@@ -180,15 +180,16 @@ fail1:
     return status;
 }
 
-DRIVER_DISPATCH Dispatch;
-
+_Function_class_(DRIVER_DISPATCH)
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_IRQL_requires_same_
 NTSTATUS
 Dispatch(
-    IN PDEVICE_OBJECT   DeviceObject,
-    IN PIRP             Irp
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _Inout_ PIRP        Irp
     )
 {
-    PXENCONS_DX          Dx;
+    PXENCONS_DX         Dx;
     NTSTATUS            status;
 
     Dx = (PXENCONS_DX)DeviceObject->DeviceExtension;
@@ -242,14 +243,14 @@ DRIVER_INITIALIZE   DriverEntry;
 
 NTSTATUS
 DriverEntry(
-    IN  PDRIVER_OBJECT  DriverObject,
-    IN  PUNICODE_STRING RegistryPath
+    _In_ PDRIVER_OBJECT     DriverObject,
+    _In_ PUNICODE_STRING    RegistryPath
     )
 {
-    HANDLE              ServiceKey;
-    HANDLE              ParametersKey;
-    ULONG               Index;
-    NTSTATUS            status;
+    HANDLE                  ServiceKey;
+    HANDLE                  ParametersKey;
+    ULONG                   Index;
+    NTSTATUS                status;
 
     ASSERT3P(__DriverGetDriverObject(), ==, NULL);
 
