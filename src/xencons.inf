@@ -65,17 +65,17 @@ xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,x
 %Vendor%=Inst,NT@INF_ARCH@
 
 [Inst.NT@INF_ARCH@]
-; DisplayName		Section		DeviceID
-; -----------		-------		--------
-
-%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@@VENDOR_DEVICE_ID@&DEV_CONS&REV_0900000A
-%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0001&DEV_CONS&REV_0900000A
-%XenConsName%		=XenCons_Inst,	XENBUS\VEN_@VENDOR_PREFIX@0002&DEV_CONS&REV_0900000A
+%XenConsName%=XenCons_Inst,\
+XENBUS\VEN_@VENDOR_PREFIX@@VENDOR_DEVICE_ID@&DEV_CONS&REV_0900000A,\
+XENBUS\VEN_@VENDOR_PREFIX@0001&DEV_CONS&REV_0900000A,\
+XENBUS\VEN_@VENDOR_PREFIX@0002&DEV_CONS&REV_0900000A
 
 [XenCons_Inst]
 CopyFiles=XenCons_Copyfiles
 CopyFiles=Monitor_Copyfiles
 CopyFiles=Tty_Copyfiles
+; TODO: Remove during next PDO version bump
+FeatureScore=0xFE
 
 [XenCons_Copyfiles]
 xencons.sys
