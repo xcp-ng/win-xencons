@@ -367,7 +367,7 @@ __FdoSetVendorName(
     ASSERT(NT_SUCCESS(status));
 }
 
-static FORCEINLINE PCHAR
+static FORCEINLINE PSTR
 __FdoGetVendorName(
     _In_ PXENCONS_FDO   Fdo
     )
@@ -375,7 +375,7 @@ __FdoGetVendorName(
     return Fdo->VendorName;
 }
 
-PCHAR
+PSTR
 FdoGetVendorName(
     _In_ PXENCONS_FDO   Fdo
     )
@@ -398,7 +398,7 @@ __FdoSetName(
     ASSERT(NT_SUCCESS(status));
 }
 
-static FORCEINLINE PCHAR
+static FORCEINLINE PSTR
 __FdoGetName(
     _In_ PXENCONS_FDO   Fdo
     )
@@ -408,7 +408,7 @@ __FdoGetName(
     return Dx->Name;
 }
 
-PCHAR
+PSTR
 FdoGetName(
     _In_ PXENCONS_FDO   Fdo
     )
@@ -745,7 +745,7 @@ __FdoEnumerate(
         }
 
         if (PdoGetDevicePnpState(Pdo) != Deleted) {
-            PCHAR           Name;
+            PSTR            Name;
             BOOLEAN         Missing;
 
             Name = PdoGetName(Pdo);
@@ -811,7 +811,7 @@ done:
 
 static FORCEINLINE PANSI_STRING
 __FdoMultiSzToUpcaseAnsi(
-    _In_ PCHAR      Buffer
+    _In_ PSTR       Buffer
     )
 {
     PANSI_STRING    Ansi;
@@ -905,7 +905,7 @@ FdoScan(
     ParametersKey = DriverGetParametersKey();
 
     for (;;) {
-        PCHAR           Buffer;
+        PSTR            Buffer;
         PANSI_STRING    Devices;
         PANSI_STRING    UnsupportedDevices;
         ULONG           Index;
@@ -1009,13 +1009,13 @@ FdoScan(
 static FORCEINLINE BOOLEAN
 __FdoMatchDistribution(
     _In_ PXENCONS_FDO   Fdo,
-    _In_ PCHAR          Buffer
+    _In_ PSTR           Buffer
     )
 {
-    PCHAR               Vendor;
-    PCHAR               Product;
-    PCHAR               Context;
-    const CHAR          *Text;
+    PSTR                Vendor;
+    PSTR                Product;
+    PSTR                Context;
+    PCSTR               Text;
     BOOLEAN             Match;
     ULONG               Index;
     NTSTATUS            status;
@@ -1050,7 +1050,7 @@ __FdoMatchDistribution(
         }
     }
 
-    Text = "XENCONS";
+    Text = "XENBUS";
 
     if (_stricmp(Product, Text) != 0)
         Match = FALSE;
@@ -1071,7 +1071,7 @@ FdoClearDistribution(
     _In_ PXENCONS_FDO   Fdo
     )
 {
-    PCHAR               Buffer;
+    PSTR                Buffer;
     PANSI_STRING        Distributions;
     ULONG               Index;
     NTSTATUS            status;
@@ -1137,14 +1137,14 @@ FdoSetDistribution(
     ULONG               Index;
     CHAR                Distribution[MAXNAMELEN];
     CHAR                Vendor[MAXNAMELEN];
-    const CHAR          *Product;
+    PCSTR               Product;
     NTSTATUS            status;
 
     Trace("====>\n");
 
     Index = 0;
     while (Index <= MAXIMUM_INDEX) {
-        PCHAR   Buffer;
+        PSTR    Buffer;
 
         status = RtlStringCbPrintfA(Distribution,
                                     MAXNAMELEN,

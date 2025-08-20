@@ -69,7 +69,7 @@ struct _XENCONS_PDO {
 
     PXENCONS_FDO                    Fdo;
     BOOLEAN                         Missing;
-    const CHAR                      *Reason;
+    PCSTR                           Reason;
     LONG                   		    Eject;
 
     XENBUS_SUSPEND_INTERFACE    	SuspendInterface;
@@ -195,7 +195,7 @@ __PdoGetDevicePowerState(
 static FORCEINLINE VOID
 __PdoSetMissing(
     _In_ PXENCONS_PDO   Pdo,
-    _In_ const CHAR     *Reason
+    _In_ PCSTR          Reason
     )
 {
     Pdo->Reason = Reason;
@@ -205,7 +205,7 @@ __PdoSetMissing(
 VOID
 PdoSetMissing(
     _In_ PXENCONS_PDO   Pdo,
-    _In_ const CHAR     *Reason
+    _In_ PCSTR          Reason
     )
 {
     __PdoSetMissing(Pdo, Reason);
@@ -282,7 +282,7 @@ __PdoSetName(
     ASSERT(NT_SUCCESS(status));
 }
 
-static FORCEINLINE PCHAR
+static FORCEINLINE PSTR
 __PdoGetName(
     _In_ PXENCONS_PDO   Pdo
     )
@@ -292,7 +292,7 @@ __PdoGetName(
     return Dx->Name;
 }
 
-PCHAR
+PSTR
 PdoGetName(
     _In_ PXENCONS_PDO   Pdo
     )
@@ -300,7 +300,7 @@ PdoGetName(
     return __PdoGetName(Pdo);
 }
 
-static FORCEINLINE PCHAR
+static FORCEINLINE PSTR
 __PdoGetVendorName(
     _In_ PXENCONS_PDO   Pdo
     )

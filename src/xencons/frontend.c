@@ -65,17 +65,17 @@ typedef enum _FRONTEND_STATE {
 struct _XENCONS_FRONTEND {
     LONG                        References;
     PXENCONS_PDO                Pdo;
-    PCHAR                       Path;
+    PSTR                        Path;
     FRONTEND_STATE              State;
     KSPIN_LOCK                  Lock;
     PXENCONS_THREAD             EjectThread;
     KEVENT                      EjectEvent;
     BOOLEAN                     Online;
 
-    PCHAR                       BackendPath;
+    PSTR                        BackendPath;
     USHORT                      BackendDomain;
-    PCHAR                       Name;
-    PCHAR                       Protocol;
+    PSTR                        Name;
+    PSTR                        Protocol;
 
     XENBUS_DEBUG_INTERFACE      DebugInterface;
     XENBUS_SUSPEND_INTERFACE    SuspendInterface;
@@ -88,7 +88,7 @@ struct _XENCONS_FRONTEND {
     PXENCONS_RING               Ring;
 };
 
-static const PCHAR
+static PCSTR
 FrontendStateName(
     _In_ FRONTEND_STATE State
     )
@@ -112,7 +112,7 @@ FrontendStateName(
 #undef  _STATE_NAME
 }
 
-static const PCHAR
+static PCSTR
 XenbusStateName(
     _In_ XenbusState    State
     )
@@ -172,7 +172,7 @@ FrontendGetPdo(
     return __FrontendGetPdo(Frontend);
 }
 
-static FORCEINLINE PCHAR
+static FORCEINLINE PSTR
 __FrontendGetPath(
     _In_ PXENCONS_FRONTEND  Frontend
     )
@@ -180,7 +180,7 @@ __FrontendGetPath(
     return Frontend->Path;
 }
 
-PCHAR
+PSTR
 FrontendGetPath(
     _In_ PXENCONS_FRONTEND  Frontend
     )
@@ -188,7 +188,7 @@ FrontendGetPath(
     return __FrontendGetPath(Frontend);
 }
 
-static FORCEINLINE PCHAR
+static FORCEINLINE PSTR
 __FrontendGetBackendPath(
     _In_ PXENCONS_FRONTEND  Frontend
     )
@@ -196,7 +196,7 @@ __FrontendGetBackendPath(
     return Frontend->BackendPath;
 }
 
-PCHAR
+PSTR
 FrontendGetBackendPath(
     _In_ PXENCONS_FRONTEND  Frontend
     )
@@ -233,7 +233,7 @@ FrontendIsBackendOnline(
     _In_ PXENCONS_FRONTEND  Frontend
     )
 {
-    PCHAR                   Buffer;
+    PSTR                    Buffer;
     BOOLEAN                 Online;
     NTSTATUS                status;
 
@@ -315,7 +315,7 @@ FrontendEjectFailed(
 {
     KIRQL                   Irql;
     ULONG                   Length;
-    PCHAR                   Path;
+    PSTR                    Path;
     NTSTATUS                status;
 
     KeAcquireSpinLock(&Frontend->Lock, &Irql);
@@ -453,7 +453,7 @@ FrontendWaitForBackendXenbusStateChange(
     Timeout.QuadPart = 0;
 
     while (*State == Old && TimeDelta < 120000) {
-        PCHAR           Buffer;
+        PSTR            Buffer;
         LARGE_INTEGER   Now;
 
         if (Watch != NULL) {
@@ -515,7 +515,7 @@ FrontendAcquireBackend(
     _In_ PXENCONS_FRONTEND  Frontend
     )
 {
-    PCHAR                   Buffer;
+    PSTR                    Buffer;
     NTSTATUS                status;
 
     Trace("=====>\n");
@@ -735,7 +735,7 @@ FrontendConnect(
 {
     XenbusState             State;
     ULONG                   Attempt;
-    PCHAR                   Buffer;
+    PSTR                    Buffer;
     ULONG                   Length;
     NTSTATUS                status;
 
@@ -1243,7 +1243,7 @@ FrontendGetProperty(
     ULONG                   InputBufferLength;
     ULONG                   OutputBufferLength;
     PVOID                   Buffer;
-    PCHAR                   Value;
+    PSTR                    Value;
     ULONG                   Length;
     NTSTATUS                status;
 
@@ -1493,9 +1493,9 @@ FrontendCreate(
     _Out_ PXENCONS_CONSOLE_ABI_CONTEXT  *Context
     )
 {
-    PCHAR                               Name;
+    PSTR                                Name;
     ULONG                               Length;
-    PCHAR                               Path;
+    PSTR                                Path;
     PXENCONS_FRONTEND                   Frontend;
     NTSTATUS                            status;
 

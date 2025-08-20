@@ -276,7 +276,7 @@ __ConsoleDeviceControl(
     ULONG                   InputBufferLength;
     ULONG                   OutputBufferLength;
     PVOID                   Buffer;
-    PCHAR                   Value;
+    PSTR                    Value;
     ULONG                   Length;
     NTSTATUS                status;
 

@@ -62,12 +62,12 @@ FrontendGetPdo(
     _In_ PXENCONS_FRONTEND  Frontend
     );
 
-extern PCHAR
+extern PSTR
 FrontendGetPath(
     _In_ PXENCONS_FRONTEND  Frontend
     );
 
-extern PCHAR
+extern PSTR
 FrontendGetBackendPath(
     _In_ PXENCONS_FRONTEND  Frontend
     );
