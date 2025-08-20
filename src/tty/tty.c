@@ -62,8 +62,8 @@ TTY_CONTEXT TtyContext;
 static VOID
 #pragma prefast(suppress:6262) // Function uses '1036' bytes of stack: exceeds /analyze:stacksize'1024'
 __Log(
-    IN  const CHAR      *Format,
-    IN  ...
+    _In_ const CHAR     *Format,
+    _In_ ...
     )
 {
     CHAR                Buffer[MAXIMUM_BUFFER_SIZE];
@@ -87,8 +87,8 @@ __Log(
 
     Length = __min(MAXIMUM_BUFFER_SIZE - 1, Length + 2);
 
-    __analysis_assume(Length < MAXIMUM_BUFFER_SIZE);
-    __analysis_assume(Length >= 2);
+    _Analysis_assume_(Length < MAXIMUM_BUFFER_SIZE);
+    _Analysis_assume_(Length >= 2);
     Buffer[Length] = '\0';
     Buffer[Length - 1] = '\n';
     Buffer[Length - 2] = '\r';
@@ -173,8 +173,8 @@ CreateChild(
 
 static VOID
 PutCharacter(
-    IN  PTTY_STREAM Stream,
-    IN  TCHAR       Character
+    _In_ PTTY_STREAM    Stream,
+    _In_ TCHAR          Character
     )
 {
     WriteFile(Stream->Write,
@@ -186,12 +186,12 @@ PutCharacter(
 
 static VOID
 PutString(
-    IN  PTTY_STREAM Stream,
-    IN  PTCHAR      Buffer,
-    IN  DWORD       Length
+    _In_ PTTY_STREAM    Stream,
+    _In_ PTCHAR         Buffer,
+    _In_ DWORD          Length
     )
 {
-    DWORD           Offset;
+    DWORD               Offset;
 
     Offset = 0;
     while (Offset < Length) {
@@ -215,15 +215,15 @@ PutString(
 
 static BOOL
 GetLine(
-    IN  PTTY_STREAM Stream,
-    IN  PTCHAR      Buffer,
-    IN  DWORD       NumberOfBytesToRead,
-    OUT LPDWORD     NumberOfBytesRead,
-    IN  BOOL        NoEcho
+    _In_ PTTY_STREAM    Stream,
+    _In_ PTCHAR         Buffer,
+    _In_ DWORD          NumberOfBytesToRead,
+    _Out_ LPDWORD       NumberOfBytesRead,
+    _In_ BOOL           NoEcho
     )
 {
-    DWORD           Offset;
-    BOOL            Success = TRUE;
+    DWORD               Offset;
+    BOOL                Success = TRUE;
 
     Offset = 0;
     while (Offset < NumberOfBytesToRead) {
@@ -290,8 +290,8 @@ GetLine(
 
 static BOOL
 GetCredentials(
-    IN  PTCHAR      Password,
-    IN  DWORD       PasswordSize
+    _In_ PTCHAR     Password,
+    _In_ DWORD      PasswordSize
     )
 {
     PTTY_CONTEXT    Context = &TtyContext;
@@ -420,7 +420,7 @@ RequestElevation(
 
 static DWORD WINAPI
 TtyIn(
-    IN  LPVOID      Argument
+    _In_ LPVOID     Argument
     )
 {
     PTTY_CONTEXT    Context = &TtyContext;
@@ -468,7 +468,7 @@ TtyIn(
 
 static DWORD WINAPI
 TtyOut(
-    IN  LPVOID      Argument
+    _In_ LPVOID     Argument
     )
 {
     PTTY_CONTEXT    Context = &TtyContext;
@@ -510,8 +510,8 @@ TtyOut(
 
 void __cdecl
 _tmain(
-    IN  int             argc,
-    IN  TCHAR           *argv[]
+    _In_ int            argc,
+    _In_ TCHAR          *argv[]
     )
 {
     PTTY_CONTEXT        Context = &TtyContext;

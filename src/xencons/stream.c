@@ -53,7 +53,7 @@ struct _XENCONS_STREAM {
 
 static FORCEINLINE PVOID
 __StreamAllocate(
-    IN  ULONG   Length
+    _In_ ULONG  Length
     )
 {
     return __AllocatePoolWithTag(NonPagedPool, Length, STREAM_POOL);
@@ -61,7 +61,7 @@ __StreamAllocate(
 
 static FORCEINLINE VOID
 __StreamFree(
-    IN  PVOID   Buffer
+    _In_ PVOID  Buffer
     )
 {
     __FreePoolWithTag(Buffer, STREAM_POOL);
@@ -71,9 +71,9 @@ IO_CSQ_INSERT_IRP_EX StreamCsqInsertIrpEx;
 
 NTSTATUS
 StreamCsqInsertIrpEx(
-    IN  PIO_CSQ         Csq,
-    IN  PIRP            Irp,
-    IN  PVOID           InsertContext OPTIONAL
+    _In_ PIO_CSQ        Csq,
+    _In_ PIRP           Irp,
+    _In_ PVOID          InsertContext OPTIONAL
     )
 {
     BOOLEAN             ReInsert = (BOOLEAN)(ULONG_PTR)InsertContext;
@@ -97,8 +97,8 @@ IO_CSQ_REMOVE_IRP StreamCsqRemoveIrp;
 
 VOID
 StreamCsqRemoveIrp(
-    IN  PIO_CSQ Csq,
-    IN  PIRP    Irp
+    _In_ PIO_CSQ    Csq,
+    _In_ PIRP       Irp
     )
 {
     UNREFERENCED_PARAMETER(Csq);
@@ -110,9 +110,9 @@ IO_CSQ_PEEK_NEXT_IRP StreamCsqPeekNextIrp;
 
 PIRP
 StreamCsqPeekNextIrp(
-    IN  PIO_CSQ     Csq,
-    IN  PIRP        Irp,
-    IN  PVOID       PeekContext OPTIONAL
+    _In_ PIO_CSQ    Csq,
+    _In_ PIRP       Irp,
+    _In_ PVOID      PeekContext OPTIONAL
     )
 {
     PXENCONS_STREAM Stream;
@@ -138,30 +138,28 @@ StreamCsqPeekNextIrp(
 #pragma warning(push)
 #pragma warning(disable:28167) // function changes IRQL
 
-IO_CSQ_ACQUIRE_LOCK StreamCsqAcquireLock;
-
+_Function_class_(IO_CSQ_ACQUIRE_LOCK)
 VOID
 StreamCsqAcquireLock(
-    IN  PIO_CSQ Csq,
-    OUT PKIRQL  Irql
+    _In_ PIO_CSQ                            Csq,
+    _Out_ _At_(*Irql, _IRQL_saves_) PKIRQL  Irql
     )
 {
-    PXENCONS_STREAM Stream;
+    PXENCONS_STREAM                         Stream;
 
     Stream = CONTAINING_RECORD(Csq, XENCONS_STREAM, Csq);
 
     KeAcquireSpinLock(&Stream->Lock, Irql);
 }
 
-IO_CSQ_RELEASE_LOCK StreamCsqReleaseLock;
-
+_Function_class_(IO_CSQ_RELEASE_LOCK)
 VOID
 StreamCsqReleaseLock(
-    IN  PIO_CSQ Csq,
-    IN  KIRQL   Irql
+    _In_ PIO_CSQ                Csq,
+    _In_ _IRQL_restores_ KIRQL  Irql
     )
 {
-    PXENCONS_STREAM Stream;
+    PXENCONS_STREAM             Stream;
 
     Stream = CONTAINING_RECORD(Csq, XENCONS_STREAM, Csq);
 
@@ -174,8 +172,8 @@ IO_CSQ_COMPLETE_CANCELED_IRP StreamCsqCompleteCanceledIrp;
 
 VOID
 StreamCsqCompleteCanceledIrp(
-    IN  PIO_CSQ Csq,
-    IN  PIRP    Irp
+    _In_ PIO_CSQ        Csq,
+    _In_ PIRP           Irp
     )
 {
     PIO_STACK_LOCATION  StackLocation;
@@ -198,8 +196,8 @@ StreamCsqCompleteCanceledIrp(
 
 static NTSTATUS
 StreamWorker(
-    IN  PXENCONS_THREAD     Self,
-    IN  PVOID               Context
+    _In_ PXENCONS_THREAD    Self,
+    _In_ PVOID              Context
     )
 {
     PXENCONS_STREAM         Stream = Context;
@@ -348,11 +346,11 @@ fail1:
 
 NTSTATUS
 StreamCreate(
-    IN  PXENCONS_FDO    Fdo,
-    OUT PXENCONS_STREAM *Stream
+    _In_ PXENCONS_FDO           Fdo,
+    _Outptr_ PXENCONS_STREAM    *Stream
     )
 {
-    NTSTATUS            status;
+    NTSTATUS                    status;
 
     *Stream = __StreamAllocate(sizeof (XENCONS_STREAM));
 
@@ -410,7 +408,7 @@ fail1:
 
 VOID
 StreamDestroy(
-    IN  PXENCONS_STREAM Stream
+    _In_ PXENCONS_STREAM    Stream
     )
 {
     Stream->Fdo = NULL;
@@ -445,8 +443,8 @@ StreamDestroy(
 
 NTSTATUS
 StreamPutQueue(
-    IN  PXENCONS_STREAM Stream,
-    IN  PIRP            Irp
+    _In_ PXENCONS_STREAM    Stream,
+    _In_ PIRP               Irp
     )
 {
     return IoCsqInsertIrpEx(&Stream->Csq, Irp, NULL, (PVOID)FALSE);
