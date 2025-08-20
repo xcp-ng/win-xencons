@@ -53,7 +53,7 @@ typedef struct _XENBUS_DEBUG_CALLBACK   XENBUS_DEBUG_CALLBACK, *PXENBUS_DEBUG_CA
 */
 typedef NTSTATUS
 (*XENBUS_DEBUG_ACQUIRE)(
-    IN  PINTERFACE  Interface
+    _In_ PINTERFACE Interface
     );
 
 /*! \typedef XENBUS_DEBUG_RELEASE
@@ -63,7 +63,7 @@ typedef NTSTATUS
 */
 typedef VOID
 (*XENBUS_DEBUG_RELEASE)(
-    IN  PINTERFACE  Interface
+    _In_ PINTERFACE Interface
     );
 
 /*! \typedef XENBUS_DEBUG_FUNCTION
@@ -77,8 +77,8 @@ typedef VOID
 */
 typedef VOID
 (*XENBUS_DEBUG_FUNCTION)(
-    IN  PVOID   Argument,
-    IN  BOOLEAN Crashing
+    _In_ PVOID      Argument,
+    _In_ BOOLEAN    Crashing
     );
 
 /*! \typedef XENBUS_DEBUG_REGISTER
@@ -92,11 +92,11 @@ typedef VOID
 */
 typedef NTSTATUS
 (*XENBUS_DEBUG_REGISTER)(
-    IN  PINTERFACE              Interface,
-    IN  PCHAR                   Prefix,
-    IN  XENBUS_DEBUG_FUNCTION   Function,
-    IN  PVOID                   Argument OPTIONAL,
-    OUT PXENBUS_DEBUG_CALLBACK  *Callback
+    _In_ PINTERFACE                 Interface,
+    _In_ PSTR                       Prefix,
+    _In_ XENBUS_DEBUG_FUNCTION      Function,
+    _In_opt_ PVOID                  Argument,
+    _Outptr_ PXENBUS_DEBUG_CALLBACK *Callback
     );
 
 /*! \typedef XENBUS_DEBUG_PRINTF
@@ -111,8 +111,8 @@ typedef NTSTATUS
 */
 typedef VOID
 (*XENBUS_DEBUG_PRINTF)(
-    IN  PINTERFACE              Interface,
-    IN  const CHAR              *Format,
+    _In_ PINTERFACE             Interface,
+    _In_ PCSTR                  Format,
     ...
     );
 
@@ -124,8 +124,8 @@ typedef VOID
 */
 typedef VOID
 (*XENBUS_DEBUG_DEREGISTER)(
-    IN  PINTERFACE              Interface,
-    IN  PXENBUS_DEBUG_CALLBACK  Callback
+    _In_ PINTERFACE             Interface,
+    _In_ PXENBUS_DEBUG_CALLBACK Callback
     );
 
 /*! \typedef XENBUS_DEBUG_TRIGGER
@@ -137,8 +137,8 @@ typedef VOID
 */
 typedef VOID
 (*XENBUS_DEBUG_TRIGGER)(
-    IN  PINTERFACE              Interface,
-    IN  PXENBUS_DEBUG_CALLBACK  Callback OPTIONAL
+    _In_ PINTERFACE                 Interface,
+    _In_opt_ PXENBUS_DEBUG_CALLBACK Callback
     );
 
 // {0DF600AE-6B20-4227-BF94-03DA9A26A114}
