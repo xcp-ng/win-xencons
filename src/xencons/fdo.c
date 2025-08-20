@@ -2263,6 +2263,8 @@ __FdoSetSystemPowerUp(
     StackLocation = IoGetCurrentIrpStackLocation(Irp);
     SystemState = StackLocation->Parameters.Power.State.SystemState;
 
+    ASSERT(SystemState >= PowerSystemUnspecified &&
+           SystemState < PowerSystemMaximum);
     ASSERT3U(SystemState, <,  __FdoGetSystemPowerState(Fdo));
 
     status = FdoForwardIrpSynchronously(Fdo, Irp);
