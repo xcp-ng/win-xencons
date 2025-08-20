@@ -55,7 +55,7 @@ PdoGetDevicePnpState(
 extern VOID
 PdoSetMissing(
     _In_ PXENCONS_PDO   Pdo,
-    _In_ const CHAR     *Reason
+    _In_ PCSTR          Reason
     );
 
 extern BOOLEAN
@@ -73,7 +73,7 @@ PdoIsEjectRequested(
     _In_ PXENCONS_PDO   Pdo
     );
 
-extern PCHAR
+extern PSTR
 PdoGetName(
     _In_ PXENCONS_PDO   Pdo
     );

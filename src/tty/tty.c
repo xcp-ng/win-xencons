@@ -62,7 +62,7 @@ TTY_CONTEXT TtyContext;
 static VOID
 #pragma prefast(suppress:6262) // Function uses '1036' bytes of stack: exceeds /analyze:stacksize'1024'
 __Log(
-    _In_ const CHAR     *Format,
+    _In_ PCSTR          Format,
     _In_ ...
     )
 {
