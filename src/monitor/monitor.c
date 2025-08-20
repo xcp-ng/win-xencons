@@ -663,6 +663,7 @@ fail1:
     return 1;
 }
 
+_Success_(return != FALSE)
 static BOOL
 GetExecutable(
     _In_ PSTR               DeviceName,
@@ -706,7 +707,7 @@ GetExecutable(
     ExecutableLength = MaxValueLength;
 
     *Executable = calloc(1, ExecutableLength);
-    if (Executable == NULL)
+    if (*Executable == NULL)
         goto fail3;
 
     Error = RegQueryValueExA(Key,
