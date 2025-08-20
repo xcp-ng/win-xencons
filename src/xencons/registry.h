@@ -37,7 +37,8 @@
 
 extern NTSTATUS
 RegistryInitialize(
-    IN PUNICODE_STRING  Path
+    _In_opt_ PDRIVER_OBJECT DrvObj,
+    _In_ PUNICODE_STRING    Path
     );
 
 extern VOID
@@ -46,159 +47,172 @@ RegistryTeardown(
     );
 
 extern NTSTATUS
+RegistryOpenParametersKey(
+    _In_ ACCESS_MASK    DesiredAccess,
+    _Out_ PHANDLE       Key
+    );
+
+extern NTSTATUS
 RegistryOpenKey(
-    IN  HANDLE          Parent,
-    IN  PUNICODE_STRING Path,
-    IN  ACCESS_MASK     DesiredAccess,
-    OUT PHANDLE         Key
+    _In_opt_ HANDLE         Parent,
+    _In_ PUNICODE_STRING    Path,
+    _In_ ACCESS_MASK        DesiredAccess,
+    _Out_ PHANDLE           Key
     );
 
 extern NTSTATUS
 RegistryCreateKey(
-    IN  HANDLE          Parent,
-    IN  PUNICODE_STRING Path,
-    IN  ULONG           Options,
-    OUT PHANDLE         Key
+    _In_opt_ HANDLE         Parent,
+    _In_ PUNICODE_STRING    Path,
+    _In_ ULONG              Options,
+    _Out_ PHANDLE           Key
     );
 
 extern NTSTATUS
 RegistryOpenServiceKey(
-    IN  ACCESS_MASK DesiredAccess,
-    OUT PHANDLE     Key
+    _In_ ACCESS_MASK    DesiredAccess,
+    _Out_ PHANDLE       Key
     );
 
 extern NTSTATUS
 RegistryCreateServiceKey(
-    OUT PHANDLE     Key
+    _Out_ PHANDLE   Key
     );
 
 extern NTSTATUS
 RegistryOpenSoftwareKey(
-    IN  PDEVICE_OBJECT  DeviceObject,
-    IN  ACCESS_MASK     DesiredAccess,
-    OUT PHANDLE         Key
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _In_ ACCESS_MASK    DesiredAccess,
+    _Out_ PHANDLE       Key
     );
 
 extern NTSTATUS
 RegistryOpenHardwareKey(
-    IN  PDEVICE_OBJECT  DeviceObject,
-    IN  ACCESS_MASK     DesiredAccess,
-    OUT PHANDLE         Key
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _In_ ACCESS_MASK    DesiredAccess,
+    _Out_ PHANDLE       Key
     );
 
 extern NTSTATUS
 RegistryOpenSubKey(
-    IN  HANDLE      Key,
-    IN  PCHAR       Name,
-    IN  ACCESS_MASK DesiredAccess,
-    OUT PHANDLE     SubKey
+    _In_opt_ HANDLE     Key,
+    _In_ PSTR           Name,
+    _In_ ACCESS_MASK    DesiredAccess,
+    _Out_ PHANDLE       SubKey
     );
 
 extern NTSTATUS
 RegistryCreateSubKey(
-    IN  HANDLE      Key,
-    IN  PCHAR       Name,
-    IN  ULONG       Options,
-    OUT PHANDLE     SubKey
+    _In_opt_ HANDLE Key,
+    _In_ PSTR       Name,
+    _In_ ULONG      Options,
+    _Out_ PHANDLE   SubKey
     );
 
 extern NTSTATUS
 RegistryDeleteSubKey(
-    IN  HANDLE      Key,
-    IN  PCHAR       Name
+    _In_ HANDLE     Key,
+    _In_ PSTR       Name
     );
 
 extern NTSTATUS
 RegistryEnumerateSubKeys(
-    IN  HANDLE      Key,
-    IN  NTSTATUS    (*Callback)(PVOID, HANDLE, PANSI_STRING),
-    IN  PVOID       Context
+    _In_ HANDLE     Key,
+    _In_ NTSTATUS   (*Callback)(PVOID, HANDLE, PANSI_STRING),
+    _In_ PVOID      Context
     );
 
 extern NTSTATUS
 RegistryEnumerateValues(
-    IN  HANDLE      Key,
-    IN  NTSTATUS    (*Callback)(PVOID, HANDLE, PANSI_STRING, ULONG),
-    IN  PVOID       Context
+    _In_ HANDLE     Key,
+    _In_ NTSTATUS   (*Callback)(PVOID, HANDLE, PANSI_STRING, ULONG),
+    _In_ PVOID      Context
     );
 
 extern NTSTATUS
 RegistryDeleteValue(
-    IN  HANDLE      Key,
-    IN  PCHAR       Name
+    _In_ HANDLE     Key,
+    _In_ PSTR       Name
     );
 
 extern NTSTATUS
 RegistryQueryDwordValue(
-    IN  HANDLE          Key,
-    IN  PCHAR           Name,
-    OUT PULONG          Value
+    _In_ HANDLE         Key,
+    _In_ PSTR           Name,
+    _Out_ PULONG        Value
+    );
+
+extern NTSTATUS
+RegistryQueryQwordValue(
+    _In_ HANDLE         Key,
+    _In_ PSTR           Name,
+    _Out_ PULONGLONG    Value
     );
 
 extern NTSTATUS
 RegistryUpdateDwordValue(
-    IN  HANDLE          Key,
-    IN  PCHAR           Name,
-    IN  ULONG           Value
+    _In_ HANDLE         Key,
+    _In_ PSTR           Name,
+    _In_ ULONG          Value
     );
 
 extern NTSTATUS
 RegistryQuerySzValue(
-    IN  HANDLE          Key,
-    IN  PCHAR           Name,
-    OUT PULONG          Type OPTIONAL,
-    OUT PANSI_STRING    *Array
+    _In_ HANDLE             Key,
+    _In_ PSTR               Name,
+    _Out_opt_ PULONG        Type,
+    _Outptr_ PANSI_STRING   *Array
     );
 
 extern NTSTATUS
 RegistryQueryBinaryValue(
-    IN  HANDLE          Key,
-    IN  PCHAR           Name,
-    OUT PVOID           *Buffer,
-    OUT PULONG          Length
+    _In_ HANDLE         Key,
+    _In_ PSTR           Name,
+    _Outptr_ PVOID      *Buffer,
+    _Out_ PULONG        Length
     );
 
 extern NTSTATUS
 RegistryUpdateBinaryValue(
-    IN  HANDLE          Key,
-    IN  PCHAR           Name,
-    IN  PVOID           Buffer,
-    IN  ULONG           Length
+    _In_ HANDLE         Key,
+    _In_ PSTR           Name,
+    _In_ PVOID          Buffer,
+    _In_ ULONG          Length
     );
 
 extern NTSTATUS
 RegistryQueryKeyName(
-    IN  HANDLE              Key,
-    OUT PANSI_STRING        *Array
+    _In_ HANDLE             Key,
+    _Outptr_ PANSI_STRING   *Array
     );
 
 extern NTSTATUS
 RegistryQuerySystemStartOption(
-    IN  PCHAR           Name,
-    OUT PANSI_STRING    *Option
+    _In_ PSTR               Name,
+    _Outptr_ PANSI_STRING   *Option
     );
 
 extern VOID
 RegistryFreeSzValue(
-    IN  PANSI_STRING    Array
+    _In_ PANSI_STRING   Array
     );
 
 extern VOID
 RegistryFreeBinaryValue(
-    IN  PVOID           Buffer
+    _In_ PVOID          Buffer
     );
 
 extern NTSTATUS
 RegistryUpdateSzValue(
-    IN  HANDLE          Key,
-    IN  PCHAR           Name,
-    IN  ULONG           Type,
-    IN  PANSI_STRING    Array
+    _In_ HANDLE         Key,
+    _In_ PSTR           Name,
+    _In_ ULONG          Type,
+    _In_ PANSI_STRING   Array
     );
 
 extern VOID
 RegistryCloseKey(
-    IN  HANDLE  Key
+    _In_ HANDLE Key
     );
 
 #endif  // _XENCONS_REGISTRY_H
