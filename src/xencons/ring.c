@@ -173,6 +173,10 @@ RingCsqPeekNextIrp(
 #pragma warning(disable:28167) // function changes IRQL
 
 _Function_class_(IO_CSQ_ACQUIRE_LOCK)
+_Requires_lock_not_held_(Csq)
+_Acquires_lock_(Csq)
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_IRQL_raises_(DISPATCH_LEVEL)
 VOID
 RingCsqAcquireLock(
     _In_ PIO_CSQ                            Csq,
@@ -187,6 +191,9 @@ RingCsqAcquireLock(
 }
 
 _Function_class_(IO_CSQ_RELEASE_LOCK)
+_Requires_lock_held_(Csq)
+_Releases_lock_(Csq)
+_IRQL_requires_(DISPATCH_LEVEL)
 VOID
 RingCsqReleaseLock(
     _In_ PIO_CSQ                Csq,
@@ -197,6 +204,7 @@ RingCsqReleaseLock(
 
     Queue = CONTAINING_RECORD(Csq, XENCONS_QUEUE, Csq);
 
+    _Analysis_assume_lock_held_(Queue->Lock);
     KeReleaseSpinLock(&Queue->Lock, Irql);
 }
 
@@ -253,6 +261,9 @@ __RingCancelRequests(
     }
 }
 
+_Requires_lock_not_held_(*Argument)
+_Acquires_lock_(*Argument)
+_IRQL_requires_min_(DISPATCH_LEVEL)
 static VOID
 RingAcquireLock(
     _In_ PVOID      Argument
@@ -263,6 +274,9 @@ RingAcquireLock(
     KeAcquireSpinLockAtDpcLevel(&Ring->Lock);
 }
 
+_Requires_lock_held_(*Argument)
+_Releases_lock_(*Argument)
+_IRQL_requires_min_(DISPATCH_LEVEL)
 static VOID
 RingReleaseLock(
     _In_ PVOID      Argument
@@ -270,7 +284,7 @@ RingReleaseLock(
 {
     PXENCONS_RING   Ring = Argument;
 
-#pragma prefast(suppress:26110)
+    _Analysis_assume_lock_held_(Ring->Lock);
     KeReleaseSpinLockFromDpcLevel(&Ring->Lock);
 }
 
