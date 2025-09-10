@@ -2993,25 +2993,27 @@ FdoCreate(
     Fdo->PhysicalDeviceObject = PhysicalDeviceObject;
     Fdo->LowerDeviceObject = IoAttachDeviceToDeviceStack(FunctionDeviceObject,
                                                          PhysicalDeviceObject);
+    if (Fdo->LowerDeviceObject == NULL)
+        goto fail4;
 
     status = ThreadCreate(FdoSystemPower, Fdo, &Fdo->SystemPowerThread);
     if (!NT_SUCCESS(status))
-        goto fail4;
+        goto fail5;
 
     status = ThreadCreate(FdoDevicePower, Fdo, &Fdo->DevicePowerThread);
     if (!NT_SUCCESS(status))
-        goto fail5;
+        goto fail6;
 
     status = __FdoAcquireLowerBusInterface(Fdo);
     if (!NT_SUCCESS(status))
-        goto fail6;
+        goto fail7;
 
     if (FdoGetBusData(Fdo,
                       PCI_WHICHSPACE_CONFIG,
                       &DeviceID,
                       FIELD_OFFSET(PCI_COMMON_HEADER, DeviceID),
                       FIELD_SIZE(PCI_COMMON_HEADER, DeviceID)) == 0)
-        goto fail7;
+        goto fail8;
 
     __FdoSetVendorName(Fdo, DeviceID);
 
@@ -3024,7 +3026,7 @@ FdoCreate(
                                  sizeof (Fdo->DebugInterface),
                                  FALSE);
     if (!NT_SUCCESS(status))
-        goto fail8;
+        goto fail9;
 
     status = FDO_QUERY_INTERFACE(Fdo,
                                  XENBUS,
@@ -3033,7 +3035,7 @@ FdoCreate(
                                  sizeof (Fdo->SuspendInterface),
                                  FALSE);
     if (!NT_SUCCESS(status))
-        goto fail9;
+        goto fail10;
 
     status = FDO_QUERY_INTERFACE(Fdo,
                                  XENBUS,
@@ -3042,7 +3044,7 @@ FdoCreate(
                                  sizeof (Fdo->StoreInterface),
                                  FALSE);
     if (!NT_SUCCESS(status))
-        goto fail10;
+        goto fail11;
 
     status = FDO_QUERY_INTERFACE(Fdo,
                                  XENBUS,
@@ -3051,7 +3053,7 @@ FdoCreate(
                                  sizeof (Fdo->ConsoleInterface),
                                  FALSE);
     if (!NT_SUCCESS(status))
-        goto fail11;
+        goto fail12;
 
     status = FDO_QUERY_INTERFACE(Fdo,
                                  XENBUS,
@@ -3060,7 +3062,7 @@ FdoCreate(
                                  sizeof(Fdo->EvtchnInterface),
                                  FALSE);
     if (!NT_SUCCESS(status))
-        goto fail12;
+        goto fail13;
 
     status = FDO_QUERY_INTERFACE(Fdo,
                                  XENBUS,
@@ -3069,7 +3071,7 @@ FdoCreate(
                                  sizeof(Fdo->GnttabInterface),
                                  FALSE);
     if (!NT_SUCCESS(status))
-        goto fail13;
+        goto fail14;
 
     Dx->Fdo = Fdo;
 
@@ -3083,13 +3085,13 @@ FdoCreate(
 
     status = PdoCreate(Fdo, NULL);
     if (!NT_SUCCESS(status))
-        goto fail14;
+        goto fail15;
 
     FunctionDeviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
     return STATUS_SUCCESS;
 
-fail14:
-    Error("fail14\n");
+fail15:
+    Error("fail15\n");
 
     Dx->Fdo = Fdo;
 
@@ -3100,65 +3102,67 @@ fail14:
     RtlZeroMemory(&Fdo->GnttabInterface,
                   sizeof(XENBUS_GNTTAB_INTERFACE));
 
-fail13:
-    Error("fail13\n");
+fail14:
+    Error("fail14\n");
 
     RtlZeroMemory(&Fdo->EvtchnInterface,
                   sizeof(XENBUS_EVTCHN_INTERFACE));
 
-fail12:
-    Error("fail12\n");
+fail13:
+    Error("fail13\n");
 
     RtlZeroMemory(&Fdo->ConsoleInterface,
                   sizeof(XENBUS_CONSOLE_INTERFACE));
 
-fail11:
-    Error("fail11\n");
+fail12:
+    Error("fail12\n");
 
     RtlZeroMemory(&Fdo->StoreInterface,
                   sizeof (XENBUS_STORE_INTERFACE));
 
-fail10:
-    Error("fail10\n");
+fail11:
+    Error("fail11\n");
 
     RtlZeroMemory(&Fdo->SuspendInterface,
                   sizeof (XENBUS_SUSPEND_INTERFACE));
 
-fail9:
-    Error("fail9\n");
+fail10:
+    Error("fail10\n");
 
     RtlZeroMemory(&Fdo->DebugInterface,
                   sizeof (XENBUS_DEBUG_INTERFACE));
 
-fail8:
-    Error("fail8\n");
+fail9:
+    Error("fail9\n");
 
     RtlZeroMemory(Fdo->VendorName, MAXNAMELEN);
 
-fail7:
-    Error("fail7\n");
+fail8:
+    Error("fail8\n");
 
     __FdoReleaseLowerBusInterface(Fdo);
 
-fail6:
-    Error("fail6\n");
+fail7:
+    Error("fail7\n");
 
     ThreadAlert(Fdo->DevicePowerThread);
     ThreadJoin(Fdo->DevicePowerThread);
     Fdo->DevicePowerThread = NULL;
 
-fail5:
-    Error("fail5\n");
+fail6:
+    Error("fail6\n");
 
     ThreadAlert(Fdo->SystemPowerThread);
     ThreadJoin(Fdo->SystemPowerThread);
     Fdo->SystemPowerThread = NULL;
 
-fail4:
-    Error("fail4\n");
+fail5:
+    Error("fail5\n");
 
-#pragma prefast(suppress:28183) // Fdo->LowerDeviceObject could be NULL
+    if (Fdo->LowerDeviceObject)
     IoDetachDevice(Fdo->LowerDeviceObject);
+
+fail4:
 
     Fdo->PhysicalDeviceObject = NULL;
     Fdo->LowerDeviceObject = NULL;
