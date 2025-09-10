@@ -1534,6 +1534,8 @@ __PdoSetSystemPower(
           PowerSystemStateName(SystemState),
           PowerActionName(PowerAction));
 
+    ASSERT(SystemState >= PowerSystemUnspecified &&
+           SystemState < PowerSystemMaximum);
     ASSERT3U(PowerAction, <, PowerActionShutdown);
 
     if (__PdoGetSystemPowerState(Pdo) > SystemState) {
