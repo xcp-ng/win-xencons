@@ -40,19 +40,19 @@
 
 extern NTSTATUS
 ConsoleCreate(
-    IN  PXENCONS_FDO                    Fdo,
-    OUT PXENCONS_CONSOLE_ABI_CONTEXT    *Context
+    _In_ PXENCONS_FDO                   Fdo,
+    _Out_ PXENCONS_CONSOLE_ABI_CONTEXT  *Context
     );
 
 VOID
 ConsoleGetAbi(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
-    OUT PXENCONS_CONSOLE_ABI            Abi
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context,
+    _Out_ PXENCONS_CONSOLE_ABI          Abi
     );
 
 VOID
 ConsoleDestroy(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context
     );
 
 #endif  // _XENCONS_CONSOLE_H

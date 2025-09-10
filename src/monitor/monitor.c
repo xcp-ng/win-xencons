@@ -111,8 +111,8 @@ static MONITOR_CONTEXT MonitorContext;
 static VOID
 #pragma prefast(suppress:6262) // Function uses '1036' bytes of stack: exceeds /analyze:stacksize'1024'
 __Log(
-    IN  const CHAR      *Format,
-    IN  ...
+    _In_ const CHAR     *Format,
+    _In_ ...
     )
 {
 #if DBG
@@ -126,9 +126,9 @@ __Log(
 
     va_start(Arguments, Format);
     Result = StringCchVPrintfA(Buffer,
-                              MAXIMUM_BUFFER_SIZE,
-                              Format,
-                              Arguments);
+                               MAXIMUM_BUFFER_SIZE,
+                               Format,
+                               Arguments);
     va_end(Arguments);
 
     if (Result != S_OK && Result != STRSAFE_E_INSUFFICIENT_BUFFER)
@@ -140,8 +140,8 @@ __Log(
 
     Length = __min(MAXIMUM_BUFFER_SIZE - 1, Length + 2);
 
-    __analysis_assume(Length < MAXIMUM_BUFFER_SIZE);
-    __analysis_assume(Length >= 2);
+    _Analysis_assume_(Length < MAXIMUM_BUFFER_SIZE);
+    _Analysis_assume_(Length >= 2);
     Buffer[Length] = '\0';
     Buffer[Length - 1] = '\n';
     Buffer[Length - 2] = '\r';
@@ -153,14 +153,14 @@ __Log(
 
     if (Context->EventLog != NULL)
         ReportEventA(Context->EventLog,
-                    EVENTLOG_INFORMATION_TYPE,
-                    0,
-                    MONITOR_LOG,
-                    NULL,
-                    ARRAYSIZE(Strings),
-                    0,
-                    Strings,
-                    NULL);
+                     EVENTLOG_INFORMATION_TYPE,
+                     0,
+                     MONITOR_LOG,
+                     NULL,
+                     ARRAYSIZE(Strings),
+                     0,
+                     Strings,
+                     NULL);
 #endif
 }
 
@@ -169,21 +169,21 @@ __Log(
 
 static PCHAR
 GetErrorMessage(
-    IN  HRESULT Error
+    _In_ HRESULT    Error
     )
 {
-    PCHAR       Message;
-    ULONG       Index;
+    PCHAR           Message;
+    ULONG           Index;
 
     if (!FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                       FORMAT_MESSAGE_FROM_SYSTEM |
-                       FORMAT_MESSAGE_IGNORE_INSERTS,
-                       NULL,
-                       Error,
-                       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                       (LPSTR)&Message,
-                       0,
-                       NULL))
+                        FORMAT_MESSAGE_FROM_SYSTEM |
+                        FORMAT_MESSAGE_IGNORE_INSERTS,
+                        NULL,
+                        Error,
+                        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                        (LPSTR)&Message,
+                        0,
+                        NULL))
         return NULL;
 
     for (Index = 0; Message[Index] != '\0'; Index++) {
@@ -198,7 +198,7 @@ GetErrorMessage(
 
 static const CHAR *
 ServiceStateName(
-    IN  DWORD   State
+    _In_ DWORD  State
     )
 {
 #define _STATE_NAME(_State) \
@@ -221,9 +221,9 @@ ServiceStateName(
 
 static VOID
 ReportStatus(
-    IN  DWORD           CurrentState,
-    IN  DWORD           Win32ExitCode,
-    IN  DWORD           WaitHint
+    _In_ DWORD          CurrentState,
+    _In_ DWORD          Win32ExitCode,
+    _In_ DWORD          WaitHint
     )
 {
     PMONITOR_CONTEXT    Context = &MonitorContext;
@@ -272,7 +272,7 @@ fail1:
 
 static FORCEINLINE VOID
 __InitializeListHead(
-    IN  PLIST_ENTRY ListEntry
+    _In_ PLIST_ENTRY    ListEntry
     )
 {
     ListEntry->Flink = ListEntry;
@@ -281,8 +281,8 @@ __InitializeListHead(
 
 static FORCEINLINE VOID
 __InsertTailList(
-    IN  PLIST_ENTRY ListHead,
-    IN  PLIST_ENTRY ListEntry
+    _In_ PLIST_ENTRY    ListHead,
+    _In_ PLIST_ENTRY    ListEntry
     )
 {
     ListEntry->Blink = ListHead->Blink;
@@ -293,11 +293,11 @@ __InsertTailList(
 
 static FORCEINLINE VOID
 __RemoveEntryList(
-    IN  PLIST_ENTRY ListEntry
+    _In_ PLIST_ENTRY    ListEntry
     )
 {
-    PLIST_ENTRY     Flink;
-    PLIST_ENTRY     Blink;
+    PLIST_ENTRY         Flink;
+    PLIST_ENTRY         Blink;
 
     Flink = ListEntry->Flink;
     Blink = ListEntry->Blink;
@@ -310,9 +310,9 @@ __RemoveEntryList(
 
 static VOID
 PutString(
-    IN  HANDLE      Handle,
-    IN  PUCHAR      Buffer,
-    IN  DWORD       Length
+    _In_ HANDLE     Handle,
+    _In_ PUCHAR     Buffer,
+    _In_ DWORD      Length
     )
 {
     DWORD           Offset;
@@ -339,7 +339,7 @@ PutString(
 
 DWORD WINAPI
 ConnectionThread(
-    IN  LPVOID          Argument
+    _In_ LPVOID         Argument
     )
 {
     PMONITOR_CONNECTION Connection = (PMONITOR_CONNECTION)Argument;
@@ -428,7 +428,7 @@ fail1:
 
 DWORD WINAPI
 ServerThread(
-    IN  LPVOID          Argument
+    _In_ LPVOID         Argument
     )
 {
     PMONITOR_CONSOLE    Console = (PMONITOR_CONSOLE)Argument;
@@ -562,7 +562,7 @@ fail1:
 
 DWORD WINAPI
 DeviceThread(
-    IN  LPVOID          Argument
+    _In_ LPVOID         Argument
     )
 {
     PMONITOR_CONSOLE    Console = (PMONITOR_CONSOLE)Argument;
@@ -668,8 +668,8 @@ fail1:
 
 static BOOL
 GetExecutable(
-    IN  PCHAR           DeviceName,
-    OUT PCHAR           *Executable
+    _In_ PCHAR          DeviceName,
+    _Out_ PCHAR         *Executable
     )
 {
     PMONITOR_CONTEXT    Context = &MonitorContext;
@@ -765,7 +765,7 @@ fail1:
 
 DWORD WINAPI
 ExecutableThread(
-    IN  LPVOID          Argument
+    _In_ LPVOID         Argument
     )
 {
     PMONITOR_CONSOLE    Console = (PMONITOR_CONSOLE)Argument;
@@ -862,7 +862,7 @@ fail1:
 
 static PMONITOR_CONSOLE
 ConsoleCreate(
-    IN  PWCHAR              DevicePath
+    _In_ PWCHAR             DevicePath
     )
 {
     PMONITOR_CONTEXT        Context = &MonitorContext;
@@ -1064,7 +1064,7 @@ fail1:
 
 static FORCEINLINE VOID
 ConsoleWaitForPipes(
-    IN  PMONITOR_CONSOLE    Console
+    _In_ PMONITOR_CONSOLE   Console
     )
 {
     PLIST_ENTRY             ListEntry;
@@ -1112,7 +1112,7 @@ fail1:
 
 static VOID
 ConsoleDestroy(
-    IN  PMONITOR_CONSOLE    Console
+    _In_ PMONITOR_CONSOLE   Console
     )
 {
     Log("====> %s", Console->DeviceName);
@@ -1159,7 +1159,7 @@ ConsoleDestroy(
 
 static BOOL
 MonitorAdd(
-    IN  PWCHAR          DevicePath
+    _In_ PWCHAR         DevicePath
     )
 {
     PMONITOR_CONTEXT    Context = &MonitorContext;
@@ -1188,7 +1188,7 @@ fail1:
 
 static BOOL
 MonitorRemove(
-    IN  HANDLE          DeviceHandle
+    _In_ HANDLE         DeviceHandle
     )
 {
     PMONITOR_CONTEXT    Context = &MonitorContext;
@@ -1372,10 +1372,10 @@ MonitorRemoveAll(
 
 DWORD WINAPI
 MonitorCtrlHandlerEx(
-    IN  DWORD           Ctrl,
-    IN  DWORD           EventType,
-    IN  LPVOID          EventData,
-    IN  LPVOID          Argument
+    _In_ DWORD          Ctrl,
+    _In_ DWORD          EventType,
+    _In_ LPVOID         EventData,
+    _In_ LPVOID         Argument
     )
 {
     PMONITOR_CONTEXT    Context = &MonitorContext;

@@ -53,7 +53,7 @@ InitializeMutex(
 }
 
 static FORCEINLINE VOID
-__drv_maxIRQL(PASSIVE_LEVEL)
+_IRQL_requires_max_(PASSIVE_LEVEL)
 AcquireMutex(
     IN  PMUTEX  Mutex
 )
@@ -69,7 +69,7 @@ AcquireMutex(
 }
 
 static FORCEINLINE VOID
-__drv_maxIRQL(PASSIVE_LEVEL)
+_IRQL_requires_max_(PASSIVE_LEVEL)
 ReleaseMutex(
     IN  PMUTEX  Mutex
 )

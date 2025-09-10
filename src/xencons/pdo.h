@@ -43,81 +43,81 @@ DEFINE_GUID(GUID_XENCONS_DEVICE_CLASS,
 
 extern VOID
 PdoSetDevicePnpState(
-    IN  PXENCONS_PDO        Pdo,
-    IN  DEVICE_PNP_STATE    State
+    _In_ PXENCONS_PDO       Pdo,
+    _In_ DEVICE_PNP_STATE   State
     );
 
 extern DEVICE_PNP_STATE
 PdoGetDevicePnpState(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern VOID
 PdoSetMissing(
-    IN  PXENCONS_PDO    Pdo,
-    IN  const CHAR      *Reason
+    _In_ PXENCONS_PDO   Pdo,
+    _In_ const CHAR     *Reason
     );
 
 extern BOOLEAN
 PdoIsMissing(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern VOID
 PdoRequestEject(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern BOOLEAN
 PdoIsEjectRequested(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern PCHAR
 PdoGetName(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern PXENCONS_FDO
 PdoGetFdo(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern PDEVICE_OBJECT
 PdoGetDeviceObject(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern BOOLEAN
 PdoIsDefault(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern NTSTATUS
 PdoCreate(
-    IN  PXENCONS_FDO    Fdo,
-    IN  PANSI_STRING    Device
+    _In_ PXENCONS_FDO       Fdo,
+    _In_opt_ PANSI_STRING   Device
     );
 
 extern NTSTATUS
 PdoResume(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern VOID
 PdoSuspend(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern VOID
 PdoDestroy(
-    IN  PXENCONS_PDO    Pdo
+    _In_ PXENCONS_PDO   Pdo
     );
 
 extern NTSTATUS
 PdoDispatch(
-    IN  PXENCONS_PDO    Pdo,
-    IN  PIRP            Irp
+    _In_ PXENCONS_PDO   Pdo,
+    _In_ PIRP           Irp
     );
 
 #endif  // _XENCONS_PDO_H

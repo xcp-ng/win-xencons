@@ -41,57 +41,57 @@ typedef struct _XENCONS_RING XENCONS_RING, *PXENCONS_RING;
 
 extern NTSTATUS
 RingCreate(
-    IN  PXENCONS_FRONTEND   Frontend,
-    OUT PXENCONS_RING       *Ring
+    _In_ PXENCONS_FRONTEND  Frontend,
+    _Out_ PXENCONS_RING     *Ring
     );
 
 extern VOID
 RingDestroy(
-    IN  PXENCONS_RING   Ring
+    _In_ PXENCONS_RING  Ring
     );
 
 extern NTSTATUS
 RingConnect(
-    IN  PXENCONS_RING   Ring
+    _In_ PXENCONS_RING  Ring
     );
 
 extern NTSTATUS
 RingStoreWrite(
-    IN  PXENCONS_RING   Ring,
-    IN  PVOID           Transaction
+    _In_ PXENCONS_RING  Ring,
+    _In_ PVOID          Transaction
     );
 
 extern VOID
 RingDisconnect(
-    IN  PXENCONS_RING   Ring
+    _In_ PXENCONS_RING  Ring
     );
 
 extern NTSTATUS
 RingEnable(
-    IN  PXENCONS_RING   Ring
+    _In_ PXENCONS_RING  Ring
     );
 
 extern VOID
 RingDisable(
-    IN  PXENCONS_RING   Ring
+    _In_ PXENCONS_RING  Ring
     );
 
 extern NTSTATUS
 RingOpen(
-    IN  PXENCONS_RING   Ring,
-    IN  PFILE_OBJECT    FileObject
+    _In_ PXENCONS_RING  Ring,
+    _In_ PFILE_OBJECT   FileObject
     );
 
 extern NTSTATUS
 RingClose(
-    IN  PXENCONS_RING   Ring,
-    IN  PFILE_OBJECT    FileObject
+    _In_ PXENCONS_RING  Ring,
+    _In_ PFILE_OBJECT   FileObject
     );
 
 extern NTSTATUS
 RingPutQueue(
-    IN  PXENCONS_RING   Ring,
-    IN  PIRP            Irp
+    _In_ PXENCONS_RING  Ring,
+    _In_ PIRP           Irp
     );
 
 #endif  // _XENCONS_RING_H

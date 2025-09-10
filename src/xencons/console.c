@@ -64,7 +64,7 @@ typedef struct _XENCONS_CONSOLE {
 
 static FORCEINLINE PVOID
 __ConsoleAllocate(
-    IN  ULONG   Length
+    _In_ ULONG  Length
     )
 {
     return __AllocatePoolWithTag(NonPagedPool, Length, CONSOLE_POOL);
@@ -72,7 +72,7 @@ __ConsoleAllocate(
 
 static FORCEINLINE VOID
 __ConsoleFree(
-    IN  PVOID   Buffer
+    _In_ PVOID  Buffer
     )
 {
     __FreePoolWithTag(Buffer, CONSOLE_POOL);
@@ -80,8 +80,8 @@ __ConsoleFree(
 
 static FORCEINLINE NTSTATUS
 __ConsoleCreateHandle(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PFILE_OBJECT        FileObject,
+    _In_ PXENCONS_CONSOLE   Console,
+    _In_ PFILE_OBJECT       FileObject,
     OUT PCONSOLE_HANDLE     *Handle
     )
 {
@@ -115,8 +115,8 @@ fail1:
 
 static FORCEINLINE VOID
 __ConsoleDestroyHandle(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PCONSOLE_HANDLE     Handle
+    _In_ PXENCONS_CONSOLE   Console,
+    _In_ PCONSOLE_HANDLE    Handle
     )
 {
     UNREFERENCED_PARAMETER(Console);
@@ -134,8 +134,8 @@ __ConsoleDestroyHandle(
 
 static PCONSOLE_HANDLE
 __ConsoleFindHandle(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PFILE_OBJECT        FileObject
+    _In_ PXENCONS_CONSOLE   Console,
+    _In_ PFILE_OBJECT       FileObject
     )
 {
     KIRQL                   Irql;
@@ -174,8 +174,8 @@ fail1:
 
 static NTSTATUS
 ConsoleOpen(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PFILE_OBJECT        FileObject
+    _In_ PXENCONS_CONSOLE   Console,
+    _In_ PFILE_OBJECT       FileObject
     )
 {
     PCONSOLE_HANDLE         Handle;
@@ -202,8 +202,8 @@ fail1:
 
 static NTSTATUS
 ConsoleClose(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PFILE_OBJECT        FileObject
+    _In_ PXENCONS_CONSOLE   Console,
+    _In_ PFILE_OBJECT       FileObject
     )
 {
     PCONSOLE_HANDLE         Handle;
@@ -234,8 +234,8 @@ fail1:
 
 static FORCEINLINE NTSTATUS
 __ConsoleReadWrite(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PIRP                Irp
+    _In_ PXENCONS_CONSOLE   Console,
+    _In_ PIRP               Irp
     )
 {
     PIO_STACK_LOCATION      StackLocation;
@@ -267,8 +267,8 @@ fail1:
 
 static FORCEINLINE NTSTATUS
 __ConsoleDeviceControl(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PIRP                Irp
+    _In_ PXENCONS_CONSOLE   Console,
+    _In_ PIRP               Irp
     )
 {
     PIO_STACK_LOCATION      StackLocation;
@@ -347,8 +347,8 @@ fail1:
 
 static NTSTATUS
 ConsolePutQueue(
-    IN  PXENCONS_CONSOLE    Console,
-    IN  PIRP                Irp
+    _In_ PXENCONS_CONSOLE   Console,
+    _In_ PIRP               Irp
     )
 {
     PIO_STACK_LOCATION      StackLocation;
@@ -377,9 +377,9 @@ ConsolePutQueue(
 
 static NTSTATUS
 ConsoleD3ToD0(
-    IN  PXENCONS_CONSOLE    Console
+    _In_ PXENCONS_CONSOLE   Console
     )
-{ 
+{
     Trace("====>\n");
 
     UNREFERENCED_PARAMETER(Console);
@@ -391,7 +391,7 @@ ConsoleD3ToD0(
 
 static VOID
 ConsoleD0ToD3(
-    IN  PXENCONS_CONSOLE    Console
+    _In_ PXENCONS_CONSOLE   Console
     )
 {
     KIRQL                   Irql;
@@ -430,7 +430,7 @@ ConsoleD0ToD3(
 
 static NTSTATUS
 ConsoleAbiAcquire(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context
     )
 {
     PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
@@ -451,7 +451,7 @@ ConsoleAbiAcquire(
 
 static VOID
 ConsoleAbiRelease(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context
     )
 {
     PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
@@ -471,7 +471,7 @@ ConsoleAbiRelease(
 
 static NTSTATUS
 ConsoleAbiD3ToD0(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context
     )
 {
     PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
@@ -481,7 +481,7 @@ ConsoleAbiD3ToD0(
 
 static VOID
 ConsoleAbiD0ToD3(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context
     )
 {
     PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
@@ -491,8 +491,8 @@ ConsoleAbiD0ToD3(
 
 static NTSTATUS
 ConsoleAbiOpen(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
-    IN  PFILE_OBJECT                    FileObject
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context,
+    _In_ PFILE_OBJECT                   FileObject
     )
 {
     PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
@@ -502,8 +502,8 @@ ConsoleAbiOpen(
 
 static NTSTATUS
 ConsoleAbiClose(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
-    IN  PFILE_OBJECT                    FileObject
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context,
+    _In_ PFILE_OBJECT                   FileObject
     )
 {
     PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
@@ -513,8 +513,8 @@ ConsoleAbiClose(
 
 static NTSTATUS
 ConsoleAbiPutQueue(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
-    IN  PIRP                            Irp
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context,
+    _In_ PIRP                           Irp
     )
 {
     PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
@@ -535,8 +535,8 @@ static XENCONS_CONSOLE_ABI ConsoleAbi = {
 
 NTSTATUS
 ConsoleCreate(
-    IN  PXENCONS_FDO                    Fdo,
-    OUT PXENCONS_CONSOLE_ABI_CONTEXT    *Context
+    _In_ PXENCONS_FDO                   Fdo,
+    _Out_ PXENCONS_CONSOLE_ABI_CONTEXT  *Context
     )
 {
     PXENCONS_CONSOLE                    Console;
@@ -569,8 +569,8 @@ fail1:
 
 VOID
 ConsoleGetAbi(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context,
-    OUT PXENCONS_CONSOLE_ABI            Abi
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context,
+    _Out_ PXENCONS_CONSOLE_ABI          Abi
     )
 {
     *Abi = ConsoleAbi;
@@ -580,11 +580,11 @@ ConsoleGetAbi(
 
 VOID
 ConsoleDestroy(
-    IN  PXENCONS_CONSOLE_ABI_CONTEXT    Context
+    _In_ PXENCONS_CONSOLE_ABI_CONTEXT   Context
     )
 {
     PXENCONS_CONSOLE                    Console = (PXENCONS_CONSOLE)Context;
-    
+
     Trace("====>\n");
 
     ASSERT(IsListEmpty(&Console->List));
