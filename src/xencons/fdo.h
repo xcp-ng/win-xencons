@@ -43,12 +43,12 @@
 
 #include "driver.h"
 
-extern PCHAR
+extern PSTR
 FdoGetVendorName(
     _In_ PXENCONS_FDO   Fdo
     );
 
-extern PCHAR
+extern PSTR
 FdoGetName(
     _In_ PXENCONS_FDO   Fdo
     );

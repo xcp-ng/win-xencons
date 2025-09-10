@@ -35,7 +35,7 @@
 
 #include <ntddk.h>
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 PowerTypeName(
     _In_ POWER_STATE_TYPE   Type
     )
@@ -55,7 +55,7 @@ PowerTypeName(
 #undef  _POWER_ACTION_NAME
 }
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 PowerSystemStateName(
     _In_ SYSTEM_POWER_STATE State
     )
@@ -81,7 +81,7 @@ PowerSystemStateName(
 #undef  _POWER_SYSTEM_STATE_NAME
 }
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 PowerDeviceStateName(
     _In_ DEVICE_POWER_STATE State
     )
@@ -105,7 +105,7 @@ PowerDeviceStateName(
 #undef  _POWER_DEVICE_STATE_NAME
 }
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 PowerActionName(
     _In_ POWER_ACTION   Type
     )
@@ -131,7 +131,7 @@ PowerActionName(
 #undef  _POWER_ACTION_NAME
 }
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 PowerMinorFunctionName(
     _In_ ULONG  MinorFunction
     )
@@ -154,7 +154,7 @@ PowerMinorFunctionName(
 #undef  _POWER_MINOR_FUNCTION_NAME
 }
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 PnpMinorFunctionName(
     _In_ ULONG  Function
     )
@@ -197,7 +197,7 @@ PnpMinorFunctionName(
 #undef  _PNP_MINOR_FUNCTION_NAME
 }
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 PartialResourceDescriptorTypeName(
     _In_ UCHAR  Type
     )
@@ -226,7 +226,7 @@ PartialResourceDescriptorTypeName(
 #undef  _PARTIAL_RESOURCE_DESCRIPTOR_TYPE_NAME
 }
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 DeviceUsageTypeName(
     _In_ DEVICE_USAGE_NOTIFICATION_TYPE Type
     )
@@ -248,7 +248,7 @@ DeviceUsageTypeName(
 #undef  _DEVICE_USAGE_TYPE_NAME
 }
 
-static FORCEINLINE const CHAR *
+static FORCEINLINE PCSTR
 MajorFunctionName(
     _In_ ULONG  Function
     )

@@ -73,7 +73,7 @@ typedef struct _MONITOR_CONSOLE {
     PWCHAR                  DevicePath;
     HANDLE                  DeviceHandle;
     HDEVNOTIFY              DeviceNotification;
-    PCHAR                   DeviceName; // protocol and instance?
+    PSTR                    DeviceName; // protocol and instance?
     HANDLE                  ExecutableThread;
     HANDLE                  ExecutableEvent;
     HANDLE                  DeviceThread;
@@ -111,8 +111,8 @@ static MONITOR_CONTEXT MonitorContext;
 static VOID
 #pragma prefast(suppress:6262) // Function uses '1036' bytes of stack: exceeds /analyze:stacksize'1024'
 __Log(
-    _In_ const CHAR     *Format,
-    _In_ ...
+    _In_ PCSTR          Format,
+    ...
     )
 {
 #if DBG
@@ -125,10 +125,7 @@ __Log(
     HRESULT             Result;
 
     va_start(Arguments, Format);
-    Result = StringCchVPrintfA(Buffer,
-                               MAXIMUM_BUFFER_SIZE,
-                               Format,
-                               Arguments);
+    Result = StringCchVPrintfA(Buffer, MAXIMUM_BUFFER_SIZE, Format, Arguments);
     va_end(Arguments);
 
     if (Result != S_OK && Result != STRSAFE_E_INSUFFICIENT_BUFFER)
@@ -167,12 +164,12 @@ __Log(
 #define Log(_Format, ...) \
     __Log(__MODULE__ "|" __FUNCTION__ ": " _Format, __VA_ARGS__)
 
-static PCHAR
+static PSTR
 GetErrorMessage(
     _In_ HRESULT    Error
     )
 {
-    PCHAR           Message;
+    PSTR            Message;
     ULONG           Index;
 
     if (!FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
@@ -196,7 +193,7 @@ GetErrorMessage(
     return Message;
 }
 
-static const CHAR *
+static PCSTR
 ServiceStateName(
     _In_ DWORD  State
     )
@@ -263,7 +260,7 @@ fail1:
     Error = GetLastError();
 
     {
-        PCHAR  Message;
+        PSTR    Message;
         Message = GetErrorMessage(Error);
         Log("fail1 (%s)", Message);
         LocalFree(Message);
@@ -668,16 +665,16 @@ fail1:
 
 static BOOL
 GetExecutable(
-    _In_ PCHAR          DeviceName,
-    _Out_ PCHAR         *Executable
+    _In_ PSTR               DeviceName,
+    _Outptr_result_z_ PSTR  *Executable
     )
 {
-    PMONITOR_CONTEXT    Context = &MonitorContext;
-    HKEY                Key;
-    DWORD               MaxValueLength;
-    DWORD               ExecutableLength;
-    DWORD               Type;
-    HRESULT             Error;
+    PMONITOR_CONTEXT        Context = &MonitorContext;
+    HKEY                    Key;
+    DWORD                   MaxValueLength;
+    DWORD                   ExecutableLength;
+    DWORD                   Type;
+    HRESULT                 Error;
 
     Error = RegOpenKeyExA(Context->ParametersKey,
                           DeviceName,
@@ -769,7 +766,7 @@ ExecutableThread(
     )
 {
     PMONITOR_CONSOLE    Console = (PMONITOR_CONSOLE)Argument;
-    PCHAR               Executable;
+    PSTR                Executable;
     PROCESS_INFORMATION ProcessInfo;
     STARTUPINFO         StartupInfo;
     BOOL                Success;
@@ -1053,7 +1050,7 @@ fail1:
     Error = GetLastError();
 
     {
-        PCHAR  Message;
+        PSTR    Message;
         Message = GetErrorMessage(Error);
         Log("fail1 (%s)", Message);
         LocalFree(Message);
@@ -1313,7 +1310,7 @@ MonitorEnumerate(
         Error = GetLastError();
 
         {
-            PCHAR  Message;
+            PSTR    Message;
             Message = GetErrorMessage(Error);
             Log("fail2 (%s)", Message);
             LocalFree(Message);
@@ -1330,7 +1327,7 @@ fail1:
     Error = GetLastError();
 
     {
-        PCHAR  Message;
+        PSTR    Message;
         Message = GetErrorMessage(Error);
         Log("fail1 (%s)", Message);
         LocalFree(Message);
