@@ -37,7 +37,7 @@
 #include "assert.h"
 #include "util.h"
 
-#define THREAD_POOL 'ERHT'
+#define THREAD_TAG 'ERHT'
 
 struct _XENCONS_THREAD {
     XENCONS_THREAD_FUNCTION Function;
@@ -50,23 +50,23 @@ struct _XENCONS_THREAD {
 
 static FORCEINLINE PVOID
 __ThreadAllocate(
-    IN  ULONG   Length
+    _In_ ULONG  Length
     )
 {
-    return __AllocatePoolWithTag(NonPagedPool, Length, THREAD_POOL);
+    return __AllocatePoolWithTag(NonPagedPool, Length, THREAD_TAG);
 }
 
 static FORCEINLINE VOID
 __ThreadFree(
-    IN  PVOID   Buffer
+    _In_ PVOID  Buffer
     )
 {
-    __FreePoolWithTag(Buffer, THREAD_POOL);
+    __FreePoolWithTag(Buffer, THREAD_TAG);
 }
 
 static FORCEINLINE VOID
 __ThreadWake(
-    IN  PXENCONS_THREAD Thread
+    _In_ PXENCONS_THREAD    Thread
     )
 {
     KeSetEvent(&Thread->Event, IO_NO_INCREMENT, FALSE);
@@ -74,7 +74,7 @@ __ThreadWake(
 
 VOID
 ThreadWake(
-    IN  PXENCONS_THREAD Thread
+    _In_ PXENCONS_THREAD    Thread
     )
 {
     __ThreadWake(Thread);
@@ -82,7 +82,7 @@ ThreadWake(
 
 static FORCEINLINE VOID
 __ThreadAlert(
-    IN  PXENCONS_THREAD Thread
+    _In_ PXENCONS_THREAD    Thread
     )
 {
     Thread->Alerted = TRUE;
@@ -91,7 +91,7 @@ __ThreadAlert(
 
 VOID
 ThreadAlert(
-    IN  PXENCONS_THREAD Thread
+    _In_ PXENCONS_THREAD    Thread
     )
 {
     __ThreadAlert(Thread);
@@ -101,7 +101,7 @@ KSTART_ROUTINE  ThreadFunction;
 
 VOID
 ThreadFunction(
-    IN  PVOID       Argument
+    _In_ PVOID      Argument
     )
 {
     PXENCONS_THREAD Self = Argument;
@@ -116,16 +116,16 @@ ThreadFunction(
     // NOT REACHED
 }
 
-__drv_requiresIRQL(PASSIVE_LEVEL)
+_IRQL_requires_(PASSIVE_LEVEL)
 NTSTATUS
 ThreadCreate(
-    IN  XENCONS_THREAD_FUNCTION Function,
-    IN  PVOID                   Context,
-    OUT PXENCONS_THREAD         *Thread
+    _In_ XENCONS_THREAD_FUNCTION    Function,
+    _In_ PVOID                      Context,
+    _Outptr_ PXENCONS_THREAD        *Thread
     )
 {
-    HANDLE                      Handle;
-    NTSTATUS                    status;
+    HANDLE                          Handle;
+    NTSTATUS                        status;
 
     ASSERT3U(KeGetCurrentIrql(), ==, PASSIVE_LEVEL);
 
@@ -189,7 +189,7 @@ fail1:
 
 PKEVENT
 ThreadGetEvent(
-    IN  PXENCONS_THREAD Thread
+    _In_ PXENCONS_THREAD    Thread
     )
 {
     return &Thread->Event;
@@ -197,7 +197,7 @@ ThreadGetEvent(
 
 BOOLEAN
 ThreadIsAlerted(
-    IN  PXENCONS_THREAD Thread
+    _In_ PXENCONS_THREAD    Thread
     )
 {
     return Thread->Alerted;
@@ -205,10 +205,10 @@ ThreadIsAlerted(
 
 VOID
 ThreadJoin(
-    IN  PXENCONS_THREAD Thread
+    _In_ PXENCONS_THREAD    Thread
     )
 {
-    LONG                References;
+    LONG                    References;
 
     ASSERT3U(KeGetCurrentIrql(), ==, PASSIVE_LEVEL);
     ASSERT3P(KeGetCurrentThread(), !=, Thread->Thread);
