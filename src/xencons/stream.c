@@ -135,10 +135,11 @@ StreamCsqPeekNextIrp(
     return NextIrp;
 }
 
-#pragma warning(push)
-#pragma warning(disable:28167) // function changes IRQL
-
 _Function_class_(IO_CSQ_ACQUIRE_LOCK)
+_Requires_lock_not_held_(Csq)
+_Acquires_lock_(Csq)
+_IRQL_requires_max_(DISPATCH_LEVEL)
+_IRQL_raises_(DISPATCH_LEVEL)
 VOID
 StreamCsqAcquireLock(
     _In_ PIO_CSQ                            Csq,
@@ -153,6 +154,9 @@ StreamCsqAcquireLock(
 }
 
 _Function_class_(IO_CSQ_RELEASE_LOCK)
+_Requires_lock_held_(Csq)
+_Releases_lock_(Csq)
+_IRQL_requires_(DISPATCH_LEVEL)
 VOID
 StreamCsqReleaseLock(
     _In_ PIO_CSQ                Csq,
@@ -163,10 +167,9 @@ StreamCsqReleaseLock(
 
     Stream = CONTAINING_RECORD(Csq, XENCONS_STREAM, Csq);
 
+    _Analysis_assume_lock_held_(Stream->Lock);
     KeReleaseSpinLock(&Stream->Lock, Irql);
 }
-
-#pragma warning(pop)
 
 IO_CSQ_COMPLETE_CANCELED_IRP StreamCsqCompleteCanceledIrp;
 
