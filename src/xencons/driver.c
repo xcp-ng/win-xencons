@@ -271,7 +271,7 @@ DriverEntry(
          MONTH,
          YEAR);
 
-    status = RegistryInitialize(RegistryPath);
+    status = RegistryInitialize(DriverObject, RegistryPath);
     if (!NT_SUCCESS(status))
         goto fail1;
 
