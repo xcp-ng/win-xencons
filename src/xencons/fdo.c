@@ -1050,7 +1050,7 @@ __FdoMatchDistribution(
         }
     }
 
-    Text = "XENBUS";
+    Text = "XENCONS";
 
     if (_stricmp(Product, Text) != 0)
         Match = FALSE;
