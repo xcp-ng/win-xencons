@@ -1797,15 +1797,11 @@ PdoDispatchReadWriteControl(
     status = XENCONS_CONSOLE_ABI(PutQueue,
                                  &Pdo->Abi,
                                  Irp);
-    if (status == STATUS_PENDING) {
-        IoMarkIrpPending(Irp);
-        goto done;
+    if (status != STATUS_PENDING) {
+        Irp->IoStatus.Status = status;
+        IoCompleteRequest(Irp, IO_NO_INCREMENT);
     }
 
-    Irp->IoStatus.Status = status;
-    IoCompleteRequest(Irp, IO_NO_INCREMENT);
-
-done:
     return status;
 }
 
