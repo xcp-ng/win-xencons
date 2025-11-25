@@ -91,10 +91,7 @@ StartType=%SERVICE_DEMAND_START%
 ErrorControl=%SERVICE_ERROR_NORMAL%
 ServiceBinary=%12%\xencons.sys
 LoadOrderGroup="Extended Base"
-AddReg = XenCons_BootFlags, XenCons_Parameters
-
-[XenCons_BootFlags]
-HKR,,"BootFlags",0x00010003,0x81
+AddReg = XenCons_Parameters
 
 [XenCons_Parameters]
 HKR,"Parameters",,0x00000010
