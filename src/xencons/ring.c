@@ -471,6 +471,9 @@ RingPoll(
     PCHAR               Buffer;
     NTSTATUS            status;
 
+    if (!Ring->Enabled)
+        return FALSE;
+
     for (;;) {
         ULONG           Read;
 
@@ -567,30 +570,25 @@ RingDpc(
     ASSERT(Ring != NULL);
 
     for (;;) {
-        BOOLEAN Enabled;
         BOOLEAN Retry;
         KIRQL   Irql;
 
         KeAcquireSpinLock(&Ring->Lock, &Irql);
-        Enabled = Ring->Enabled;
-        KeReleaseSpinLock(&Ring->Lock, Irql);
-
-        if (!Enabled)
-            break;
-
-        KeRaiseIrql(DISPATCH_LEVEL, &Irql);
         Retry = RingPoll(Ring);
-        KeLowerIrql(Irql);
+
+        if (!Retry && Ring->Enabled) {
+            (VOID) XENBUS_EVTCHN(Unmask,
+                                 &Ring->EvtchnInterface,
+                                 Ring->Channel,
+                                 FALSE,
+                                 FALSE);
+        }
+
+        KeReleaseSpinLock(&Ring->Lock, Irql);
 
         if (!Retry)
             break;
     }
-
-    (VOID) XENBUS_EVTCHN(Unmask,
-                         &Ring->EvtchnInterface,
-                         Ring->Channel,
-                         FALSE,
-                         FALSE);
 }
 
 _Function_class_(KSERVICE_ROUTINE)
