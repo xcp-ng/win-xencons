@@ -43,6 +43,8 @@
 #include <sddl.h>
 #include <malloc.h>
 #include <assert.h>
+#include <TraceLoggingProvider.h>
+#include <winmeta.h>
 
 #include <xencons_device.h>
 #include <version.h>
@@ -59,7 +61,6 @@
 typedef struct _MONITOR_CONTEXT {
     SERVICE_STATUS          Status;
     SERVICE_STATUS_HANDLE   Service;
-    HANDLE                  EventLog;
     HANDLE                  StopEvent;
     HKEY                    ParametersKey;
     HDEVNOTIFY              InterfaceNotification;
@@ -108,30 +109,43 @@ static MONITOR_CONTEXT MonitorContext;
 #define PARAMETERS_KEY(_Service) \
         SERVICE_KEY(_Service) ## "\\Parameters"
 
+TRACELOGGING_DEFINE_PROVIDER(MonitorTraceLoggingProvider,
+                             MONITOR_NAME,
+                             // {F1D4F89A-D4FC-5C76-865B-27532946CA0A}
+                             (0xF1D4F89A, 0xD4FC, 0x5C76, 0x86, 0x5B, 0x27, 0x53, 0x29, 0x46, 0xCA, 0x0A));
+
+typedef enum {
+    LOG_INFO,
+    LOG_ERROR
+} LOG_LEVEL;
+
+#ifdef UNICODE
+#define TraceLoggingStringT(_buf, _name)    TraceLoggingWideString(_buf, _name)
+#else
+#define TraceLoggingStringT(_buf, _name)    TraceLoggingString(_buf, _name)
+#endif
+
 static VOID
 #pragma prefast(suppress:6262) // Function uses '1036' bytes of stack: exceeds /analyze:stacksize'1024'
 __Log(
-    _In_ PCSTR          Format,
+    _In_ LOG_LEVEL      Level,
+    _In_ PCTSTR         Format,
     ...
     )
 {
-#if DBG
-    PMONITOR_CONTEXT    Context = &MonitorContext;
-    const CHAR          *Strings[1];
-#endif
-    CHAR                Buffer[MAXIMUM_BUFFER_SIZE];
+    TCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
     va_list             Arguments;
     size_t              Length;
     HRESULT             Result;
 
     va_start(Arguments, Format);
-    Result = StringCchVPrintfA(Buffer, MAXIMUM_BUFFER_SIZE, Format, Arguments);
+    Result = StringCchVPrintf(Buffer, MAXIMUM_BUFFER_SIZE, Format, Arguments);
     va_end(Arguments);
 
     if (Result != S_OK && Result != STRSAFE_E_INSUFFICIENT_BUFFER)
         return;
 
-    Result = StringCchLengthA(Buffer, MAXIMUM_BUFFER_SIZE, &Length);
+    Result = StringCchLength(Buffer, MAXIMUM_BUFFER_SIZE, &Length);
     if (Result != S_OK)
         return;
 
@@ -139,30 +153,35 @@ __Log(
 
     _Analysis_assume_(Length < MAXIMUM_BUFFER_SIZE);
     _Analysis_assume_(Length >= 2);
-    Buffer[Length] = '\0';
-    Buffer[Length - 1] = '\n';
-    Buffer[Length - 2] = '\r';
+    Buffer[Length] = _T('\0');
+    Buffer[Length - 1] = _T('\n');
+    Buffer[Length - 2] = _T('\r');
 
     OutputDebugString(Buffer);
 
-#if DBG
-    Strings[0] = Buffer;
-
-    if (Context->EventLog != NULL)
-        ReportEventA(Context->EventLog,
-                     EVENTLOG_INFORMATION_TYPE,
-                     0,
-                     MONITOR_LOG,
-                     NULL,
-                     ARRAYSIZE(Strings),
-                     0,
-                     Strings,
-                     NULL);
-#endif
+    switch (Level) {
+    case LOG_INFO:
+        TraceLoggingWrite(MonitorTraceLoggingProvider,
+                          "Information",
+                          TraceLoggingLevel(WINEVENT_LEVEL_INFO),
+                          TraceLoggingStringT(Buffer, "Info"));
+        break;
+    case LOG_ERROR:
+        TraceLoggingWrite(MonitorTraceLoggingProvider,
+                          "Error",
+                          TraceLoggingLevel(WINEVENT_LEVEL_ERROR),
+                          TraceLoggingStringT(Buffer, "Error"));
+        break;
+    default:
+        break;
+    }
 }
 
-#define Log(_Format, ...) \
-    __Log(__MODULE__ "|" __FUNCTION__ ": " _Format, __VA_ARGS__)
+#define LogInfo(_Format, ...) \
+        __Log(LOG_INFO, _T(__MODULE__ "|" __FUNCTION__ ": " _Format), __VA_ARGS__)
+
+#define LogError(_Format, ...) \
+        __Log(LOG_ERROR, _T(__MODULE__ "|" __FUNCTION__ ": " _Format), __VA_ARGS__)
 
 static PSTR
 GetErrorMessage(
@@ -228,7 +247,7 @@ ReportStatus(
     BOOL                Success;
     HRESULT             Error;
 
-    Log("====> (%s)", ServiceStateName(CurrentState));
+    LogInfo("====> (%s)", ServiceStateName(CurrentState));
 
     Context->Status.dwCurrentState = CurrentState;
     Context->Status.dwWin32ExitCode = Win32ExitCode;
@@ -252,7 +271,7 @@ ReportStatus(
     if (!Success)
         goto fail1;
 
-    Log("<====");
+    LogInfo("<====");
 
     return;
 
@@ -262,7 +281,7 @@ fail1:
     {
         PSTR    Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 }
@@ -348,7 +367,7 @@ ConnectionThread(
     DWORD               Object;
     HRESULT             Error;
 
-    Log("====> %s", Console->DeviceName);
+    LogInfo("====> %s", Console->DeviceName);
 
     ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
     Overlapped.hEvent = CreateEvent(NULL,
@@ -406,7 +425,7 @@ ConnectionThread(
     CloseHandle(Connection->Thread);
     free(Connection);
 
-    Log("<==== %s", Console->DeviceName);
+    LogInfo("<==== %s", Console->DeviceName);
 
     return 0;
 
@@ -416,7 +435,7 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -438,7 +457,7 @@ ServerThread(
     HRESULT             Error;
     SECURITY_ATTRIBUTES SecurityAttributes;
 
-    Log("====> %s", Console->DeviceName);
+    LogInfo("====> %s", Console->DeviceName);
 
     ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
     Overlapped.hEvent = CreateEvent(NULL,
@@ -459,7 +478,7 @@ ServerThread(
     if (Error != S_OK && Error != STRSAFE_E_INSUFFICIENT_BUFFER)
         goto fail2;
 
-    Log("%s", PipeName);
+    LogInfo("%s", PipeName);
 
     ZeroMemory(&SecurityAttributes, sizeof(SECURITY_ATTRIBUTES));
     SecurityAttributes.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -517,30 +536,30 @@ ServerThread(
 
     CloseHandle(Overlapped.hEvent);
 
-    Log("<==== %s", Console->DeviceName);
+    LogInfo("<==== %s", Console->DeviceName);
 
     return 0;
 
 fail6:
-    Log("fail6");
+    LogError("fail6");
 
     free(Connection);
 
 fail5:
-    Log("fail5");
+    LogError("fail5");
 
     CloseHandle(Pipe);
 
 fail4:
-    Log("fail4");
+    LogError("fail4");
 
     LocalFree(&SecurityAttributes.lpSecurityDescriptor);
 
 fail3:
-    Log("fail3");
+    LogError("fail3");
 
 fail2:
-    Log("fail2");
+    LogError("fail2");
 
     CloseHandle(Overlapped.hEvent);
 
@@ -550,7 +569,7 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -571,7 +590,7 @@ DeviceThread(
     HANDLE              Handles[2];
     DWORD               Error;
 
-    Log("====> %s", Console->DeviceName);
+    LogInfo("====> %s", Console->DeviceName);
 
     ZeroMemory(&Overlapped, sizeof(OVERLAPPED));
     Overlapped.hEvent = CreateEvent(NULL,
@@ -641,12 +660,12 @@ DeviceThread(
 
     CloseHandle(Overlapped.hEvent);
 
-    Log("<==== %s", Console->DeviceName);
+    LogInfo("<==== %s", Console->DeviceName);
 
     return 0;
 
 fail2:
-    Log("fail2\n");
+    LogError("fail2\n");
 
     CloseHandle(Overlapped.hEvent);
 
@@ -656,7 +675,7 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -726,25 +745,25 @@ GetExecutable(
         goto fail5;
     }
 
-    Log("%s = %s", DeviceName, *Executable);
+    LogInfo("%s = %s", DeviceName, *Executable);
 
     RegCloseKey(Key);
 
     return TRUE;
 
 fail5:
-    Log("fail5");
+    LogError("fail5");
 
 fail4:
-    Log("fail4");
+    LogError("fail4");
 
     free(*Executable);
 
 fail3:
-    Log("fail3");
+    LogError("fail3");
 
 fail2:
-    Log("fail2");
+    LogError("fail2");
 
     RegCloseKey(Key);
 
@@ -754,7 +773,7 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -775,7 +794,7 @@ ExecutableThread(
     DWORD               Object;
     HRESULT             Error;
 
-    Log("====> %s", Console->DeviceName);
+    LogInfo("====> %s", Console->DeviceName);
 
     // If there is no executable, this thread can finish now.
     if (!GetExecutable(Console->DeviceName,
@@ -789,7 +808,7 @@ again:
     ZeroMemory(&StartupInfo, sizeof (StartupInfo));
     StartupInfo.cb = sizeof (StartupInfo);
 
-    Log("Executing: %s", Executable);
+    LogInfo("Executing: %s", Executable);
 
 #pragma warning(suppress:6053) // CommandLine might not be NUL-terminated
     Success = CreateProcess(NULL,
@@ -839,7 +858,7 @@ again:
     free(Executable);
 
 done:
-    Log("<==== %s", Console->DeviceName);
+    LogInfo("<==== %s", Console->DeviceName);
 
     return 0;
 
@@ -851,7 +870,7 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -871,7 +890,7 @@ ConsoleCreate(
     BOOL                    Success;
     HRESULT                 Error;
 
-    Log("====> %ws", DevicePath);
+    LogInfo("====> %ws", DevicePath);
 
     Console = malloc(sizeof(MONITOR_CONSOLE));
     if (Console == NULL)
@@ -975,48 +994,48 @@ ConsoleCreate(
     if (Console->ExecutableThread == NULL)
         goto fail12;
 
-    Log("<==== %s", Console->DeviceName);
+    LogInfo("<==== %s", Console->DeviceName);
 
     return Console;
 
 fail12:
-    Log("fail12");
+    LogError("fail12");
 
     CloseHandle(Console->ExecutableEvent);
     Console->ExecutableEvent = NULL;
 
 fail11:
-    Log("fail11");
+    LogError("fail11");
 
     SetEvent(Console->ServerEvent);
     WaitForSingleObject(Console->ServerThread, INFINITE);
 
 fail10:
-    Log("fail10");
+    LogError("fail10");
 
     CloseHandle(Console->ServerEvent);
     Console->ServerEvent = NULL;
 
 fail9:
-    Log("fail9");
+    LogError("fail9");
 
     SetEvent(Console->DeviceEvent);
     WaitForSingleObject(Console->DeviceThread, INFINITE);
 
 fail8:
-    Log("fail8");
+    LogError("fail8");
 
     CloseHandle(Console->DeviceEvent);
     Console->DeviceEvent = NULL;
 
 fail7:
-    Log("fail7");
+    LogError("fail7");
 
     UnregisterDeviceNotification(Console->DeviceNotification);
     Console->DeviceNotification = NULL;
 
 fail6:
-    Log("fail6");
+    LogError("fail6");
 
     ECHO(Console->DeviceHandle, "\r\n[DETACHED]\r\n");
 
@@ -1024,22 +1043,22 @@ fail6:
     Console->DevicePath = NULL;
 
 fail5:
-    Log("fail5");
+    LogError("fail5");
 
 fail4:
-    Log("fail4");
+    LogError("fail4");
 
     CloseHandle(Console->DeviceHandle);
     Console->DeviceHandle = INVALID_HANDLE_VALUE;
 
 fail3:
-    Log("fail3");
+    LogError("fail3");
 
     free(Console->DevicePath);
     Console->DevicePath = NULL;
 
 fail2:
-    Log("fail2");
+    LogError("fail2");
 
     DeleteCriticalSection(&Console->CriticalSection);
     ZeroMemory(&Console->ListHead, sizeof(LIST_ENTRY));
@@ -1053,7 +1072,7 @@ fail1:
     {
         PSTR    Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -1113,7 +1132,7 @@ ConsoleDestroy(
     _In_ PMONITOR_CONSOLE   Console
     )
 {
-    Log("====> %s", Console->DeviceName);
+    LogInfo("====> %s", Console->DeviceName);
 
     SetEvent(Console->ExecutableEvent);
     WaitForSingleObject(Console->ExecutableThread, INFINITE);
@@ -1152,7 +1171,7 @@ ConsoleDestroy(
 
     free(Console);
 
-    Log("<====");
+    LogInfo("<====");
 }
 
 static BOOL
@@ -1163,7 +1182,7 @@ MonitorAdd(
     PMONITOR_CONTEXT    Context = &MonitorContext;
     PMONITOR_CONSOLE    Console;
 
-    Log("=====> %ws", DevicePath);
+    LogInfo("=====> %ws", DevicePath);
 
     Console = ConsoleCreate(DevicePath);
     if (Console == NULL)
@@ -1174,12 +1193,12 @@ MonitorAdd(
     ++Context->ListCount;
     LeaveCriticalSection(&Context->CriticalSection);
 
-    Log("<===== %s", Console->DeviceName);
+    LogInfo("<===== %s", Console->DeviceName);
 
     return TRUE;
 
 fail1:
-    Log("fail1");
+    LogError("fail1");
 
     return FALSE;
 }
@@ -1193,7 +1212,7 @@ MonitorRemove(
     PMONITOR_CONSOLE    Console;
     PLIST_ENTRY         ListEntry;
 
-    Log("=====> 0x%p", DeviceHandle);
+    LogInfo("=====> 0x%p", DeviceHandle);
 
     EnterCriticalSection(&Context->CriticalSection);
     for (ListEntry = Context->ListHead.Flink;
@@ -1208,7 +1227,7 @@ MonitorRemove(
     }
     LeaveCriticalSection(&Context->CriticalSection);
 
-    Log("DeviceHandle 0x%p not found", DeviceHandle);
+    LogError("DeviceHandle 0x%p not found", DeviceHandle);
 
     return FALSE;
 
@@ -1219,7 +1238,7 @@ found:
 
     ConsoleDestroy(Console);
 
-    Log("<=====");
+    LogInfo("<=====");
 
     return TRUE;
 }
@@ -1239,7 +1258,7 @@ MonitorEnumerate(
     HRESULT                             Error;
     BOOL                                Success;
 
-    Log("====>");
+    LogInfo("====>");
 
     DeviceInfoSet = SetupDiGetClassDevs(&GUID_XENCONS_DEVICE,
                                         NULL,
@@ -1299,28 +1318,28 @@ MonitorEnumerate(
         continue;
 
     fail5:
-        Log("fail5");
+        LogError("fail5");
     fail4:
-        Log("fail4");
+        LogError("fail4");
 
         free(DeviceInterfaceDetail);
 
     fail3:
-        Log("fail3");
+        LogError("fail3");
     fail2:
         Error = GetLastError();
 
         {
             PSTR    Message;
             Message = GetErrorMessage(Error);
-            Log("fail2 (%s)", Message);
+            LogError("fail2 (%s)", Message);
             LocalFree(Message);
         }
     }
 
     SetupDiDestroyDeviceInfoList(DeviceInfoSet);
 
-    Log("<====");
+    LogInfo("<====");
 
     return TRUE;
 
@@ -1330,7 +1349,7 @@ fail1:
     {
         PSTR    Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -1345,7 +1364,7 @@ MonitorRemoveAll(
     PMONITOR_CONTEXT    Context = &MonitorContext;
     PMONITOR_CONSOLE    Console;
 
-    Log("=====>");
+    LogInfo("=====>");
 
     for (;;) {
         EnterCriticalSection(&Context->CriticalSection);
@@ -1365,7 +1384,7 @@ MonitorRemoveAll(
     }
     LeaveCriticalSection(&Context->CriticalSection);
 
-    Log("<=====");
+    LogInfo("<=====");
 }
 
 DWORD WINAPI
@@ -1439,7 +1458,10 @@ MonitorMain(
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
 
-    Log("====>");
+    if (TraceLoggingRegister(MonitorTraceLoggingProvider) != ERROR_SUCCESS)
+        LogInfo("TraceLoggingRegister failed");
+
+    LogInfo("====>");
 
     Error = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
                          PARAMETERS_KEY(__MODULE__),
@@ -1455,11 +1477,6 @@ MonitorMain(
     if (Context->Service == NULL)
         goto fail2;
 
-    Context->EventLog = RegisterEventSourceA(NULL,
-                                            MONITOR_NAME);
-    if (Context->EventLog == NULL)
-        goto fail3;
-
     Context->Status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
     Context->Status.dwServiceSpecificExitCode = 0;
 
@@ -1471,7 +1488,7 @@ MonitorMain(
                                      NULL);
 
     if (Context->StopEvent == NULL)
-        goto fail4;
+        goto fail3;
 
     ZeroMemory(&Interface, sizeof (Interface));
     Interface.dbcc_size = sizeof (Interface);
@@ -1483,7 +1500,7 @@ MonitorMain(
                                    &Interface,
                                    DEVICE_NOTIFY_SERVICE_HANDLE);
     if (Context->InterfaceNotification == NULL)
-        goto fail5;
+        goto fail4;
 
     ReportStatus(SERVICE_RUNNING, NO_ERROR, 0);
 
@@ -1492,9 +1509,9 @@ MonitorMain(
 
     MonitorEnumerate();
 
-    Log("Waiting...");
+    LogInfo("Waiting...");
     WaitForSingleObject(Context->StopEvent, INFINITE);
-    Log("Wait Complete");
+    LogInfo("Wait Complete");
 
     MonitorRemoveAll();
 
@@ -1507,31 +1524,26 @@ MonitorMain(
 
     ReportStatus(SERVICE_STOPPED, NO_ERROR, 0);
 
-    (VOID) DeregisterEventSource(Context->EventLog);
-
     RegCloseKey(Context->ParametersKey);
 
-    Log("<====");
+    LogInfo("<====");
+
+    TraceLoggingUnregister(MonitorTraceLoggingProvider);
 
     return;
 
-fail5:
-    Log("fail5");
+fail4:
+    LogError("fail4");
 
     CloseHandle(Context->StopEvent);
 
-fail4:
-    Log("fail4");
+fail3:
+    LogError("fail3");
 
     ReportStatus(SERVICE_STOPPED, GetLastError(), 0);
 
-    (VOID) DeregisterEventSource(Context->EventLog);
-
-fail3:
-    Log("fail3");
-
 fail2:
-    Log("fail2");
+    LogError("fail2");
 
     RegCloseKey(Context->ParametersKey);
 
@@ -1541,9 +1553,11 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
+
+    TraceLoggingUnregister(MonitorTraceLoggingProvider);
 }
 
 static BOOL
@@ -1556,7 +1570,7 @@ MonitorCreate(
     CHAR        Path[MAX_PATH];
     HRESULT     Error;
 
-    Log("====>");
+    LogInfo("====>");
 
     if(!GetModuleFileNameA(NULL, Path, MAX_PATH))
         goto fail1;
@@ -1588,17 +1602,17 @@ MonitorCreate(
     CloseServiceHandle(Service);
     CloseServiceHandle(SCManager);
 
-    Log("<====");
+    LogInfo("<====");
 
     return TRUE;
 
 fail3:
-    Log("fail3");
+    LogError("fail3");
 
     CloseServiceHandle(SCManager);
 
 fail2:
-    Log("fail2");
+    LogError("fail2");
 
 fail1:
     Error = GetLastError();
@@ -1606,7 +1620,7 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -1624,7 +1638,7 @@ MonitorDelete(
     SERVICE_STATUS      Status;
     HRESULT             Error;
 
-    Log("====>");
+    LogInfo("====>");
 
     SCManager = OpenSCManager(NULL,
                               NULL,
@@ -1655,20 +1669,20 @@ MonitorDelete(
     CloseServiceHandle(Service);
     CloseServiceHandle(SCManager);
 
-    Log("<====");
+    LogInfo("<====");
 
     return TRUE;
 
 fail4:
-    Log("fail4");
+    LogError("fail4");
 
 fail3:
-    Log("fail3");
+    LogError("fail3");
 
     CloseServiceHandle(Service);
 
 fail2:
-    Log("fail2");
+    LogError("fail2");
 
     CloseServiceHandle(SCManager);
 
@@ -1678,7 +1692,7 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
@@ -1696,16 +1710,16 @@ MonitorEntry(
     };
     HRESULT             Error;
 
-    Log("%s (%s) ====>",
-        MAJOR_VERSION_STR "." MINOR_VERSION_STR "." MICRO_VERSION_STR "." BUILD_NUMBER_STR,
-        DAY_STR "/" MONTH_STR "/" YEAR_STR);
+    LogInfo("%s (%s) ====>",
+            MAJOR_VERSION_STR "." MINOR_VERSION_STR "." MICRO_VERSION_STR "." BUILD_NUMBER_STR,
+            DAY_STR "/" MONTH_STR "/" YEAR_STR);
 
     if (!StartServiceCtrlDispatcher(Table))
         goto fail1;
 
-    Log("%s (%s) <====",
-        MAJOR_VERSION_STR "." MINOR_VERSION_STR "." MICRO_VERSION_STR "." BUILD_NUMBER_STR,
-        DAY_STR "/" MONTH_STR "/" YEAR_STR);
+    LogInfo("%s (%s) <====",
+            MAJOR_VERSION_STR "." MINOR_VERSION_STR "." MICRO_VERSION_STR "." BUILD_NUMBER_STR,
+            DAY_STR "/" MONTH_STR "/" YEAR_STR);
 
     return TRUE;
 
@@ -1715,7 +1729,7 @@ fail1:
     {
         PTCHAR  Message;
         Message = GetErrorMessage(Error);
-        Log("fail1 (%s)", Message);
+        LogError("fail1 (%s)", Message);
         LocalFree(Message);
     }
 
