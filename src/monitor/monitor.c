@@ -1509,7 +1509,7 @@ MonitorMain(
 
     (VOID) DeregisterEventSource(Context->EventLog);
 
-    CloseHandle(Context->ParametersKey);
+    RegCloseKey(Context->ParametersKey);
 
     Log("<====");
 
@@ -1533,7 +1533,7 @@ fail3:
 fail2:
     Log("fail2");
 
-    CloseHandle(Context->ParametersKey);
+    RegCloseKey(Context->ParametersKey);
 
 fail1:
     Error = GetLastError();
