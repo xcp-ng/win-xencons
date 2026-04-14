@@ -51,7 +51,7 @@ typedef struct _TTY_CONTEXT {
     TTY_STREAM          ChildStdIn;
     TTY_STREAM          ChildStdOut;
     TTY_STREAM          Device;
-    TCHAR               UserName[MAXIMUM_BUFFER_SIZE];
+    CHAR                UserName[MAXIMUM_BUFFER_SIZE];
     HANDLE              Token;
     HANDLE              OriginalToken;
     PROCESS_INFORMATION ProcessInfo;
@@ -102,12 +102,12 @@ CreateChild(
     )
 {
     PTTY_CONTEXT            Context = &TtyContext;
-    TCHAR                   CommandLine[] = TEXT("c:\\windows\\system32\\cmd.exe /q /a");
+    CHAR                    CommandLine[] = "c:\\windows\\system32\\cmd.exe /q /a";
     PVOID                   Environment;
-    PROFILEINFO             ProfileInfo;
+    PROFILEINFOA            ProfileInfo;
     DWORD                   Size;
-    TCHAR                   ProfileDir[MAXIMUM_BUFFER_SIZE];
-    STARTUPINFO             StartupInfo;
+    CHAR                    ProfileDir[MAXIMUM_BUFFER_SIZE];
+    STARTUPINFOA            StartupInfo;
     BOOL                    Success;
 
     Success = CreateEnvironmentBlock(&Environment,
@@ -120,15 +120,15 @@ CreateChild(
     ProfileInfo.dwSize = sizeof (ProfileInfo);
     ProfileInfo.lpUserName = Context->UserName;
 
-    Success = LoadUserProfile(Context->Token, &ProfileInfo);
+    Success = LoadUserProfileA(Context->Token, &ProfileInfo);
     if (!Success)
         return FALSE;
 
     Size = sizeof (ProfileDir);
 
-    Success = GetUserProfileDirectory(Context->Token,
-                                      ProfileDir,
-                                      &Size);
+    Success = GetUserProfileDirectoryA(Context->Token,
+                                       ProfileDir,
+                                       &Size);
     if (!Success)
         return FALSE;
 
@@ -146,17 +146,17 @@ CreateChild(
     StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
 
 #pragma warning(suppress:6335) // leaking handle information
-    Success = CreateProcessAsUser(Context->Token,
-                                  NULL,
-                                  CommandLine,
-                                  NULL,
-                                  NULL,
-                                  TRUE,
-                                  CREATE_UNICODE_ENVIRONMENT,
-                                  Environment,
-                                  ProfileDir,
-                                  &StartupInfo,
-                                  &Context->ProcessInfo);
+    Success = CreateProcessAsUserA(Context->Token,
+                                   NULL,
+                                   CommandLine,
+                                   NULL,
+                                   NULL,
+                                   TRUE,
+                                   CREATE_UNICODE_ENVIRONMENT,
+                                   Environment,
+                                   ProfileDir,
+                                   &StartupInfo,
+                                   &Context->ProcessInfo);
 
     DestroyEnvironmentBlock(Environment);
 
@@ -171,7 +171,7 @@ CreateChild(
 static VOID
 PutCharacter(
     _In_ PTTY_STREAM    Stream,
-    _In_ TCHAR          Character
+    _In_ CHAR           Character
     )
 {
     WriteFile(Stream->Write,
@@ -184,11 +184,11 @@ PutCharacter(
 static VOID
 PutString(
     _In_ PTTY_STREAM    Stream,
-    _In_ PTCHAR         Buffer,
+    _In_ PCHAR          Buffer,
     _In_ DWORD          Length
     )
 {
-    DWORD               Offset;
+    DWORD           Offset;
 
     Offset = 0;
     while (Offset < Length) {
@@ -208,12 +208,12 @@ PutString(
 }
 
 #define ECHO(_Stream, _Buffer) \
-    PutString((_Stream), TEXT(_Buffer), (DWORD)_tcslen(_Buffer))
+    PutString((_Stream), (_Buffer), (DWORD)strlen(_Buffer))
 
 static BOOL
 GetLine(
     _In_ PTTY_STREAM    Stream,
-    _In_ PTCHAR         Buffer,
+    _In_ PCHAR          Buffer,
     _In_ DWORD          NumberOfBytesToRead,
     _Out_ LPDWORD       NumberOfBytesRead,
     _In_ BOOL           NoEcho
@@ -224,8 +224,8 @@ GetLine(
 
     Offset = 0;
     while (Offset < NumberOfBytesToRead) {
-        TCHAR   Sequence[MAXIMUM_BUFFER_SIZE];
-        PTCHAR  Character;
+        CHAR    Sequence[MAXIMUM_BUFFER_SIZE];
+        PCHAR   Character;
         DWORD   Read;
 
         Success = ReadFile(Stream->Read,
@@ -287,20 +287,20 @@ GetLine(
 
 static BOOL
 GetCredentials(
-    _In_ PTCHAR     Password,
-    _In_ DWORD      PasswordSize
+    _Out_writes_z_(PasswordSize) PCHAR  Password,
+    _In_ DWORD                          PasswordSize
     )
 {
     PTTY_CONTEXT    Context = &TtyContext;
-    TCHAR           ComputerName[MAX_COMPUTERNAME_LENGTH + 1];
-    PTCHAR          End;
+    CHAR            ComputerName[MAX_COMPUTERNAME_LENGTH + 1];
+    PCHAR           End;
     DWORD           Size;
     BOOL            Success;
 
     ZeroMemory(ComputerName, sizeof (ComputerName));
     Size = sizeof (ComputerName);
 
-    Success = GetComputerName(ComputerName, &Size);
+    Success = GetComputerNameA(ComputerName, &Size);
     if (!Success)
         return FALSE;
 
@@ -318,13 +318,13 @@ GetCredentials(
     if (!Success)
         return FALSE;
 
-    End = _tcschr(Context->UserName, TEXT('\r'));
+    End = strchr(Context->UserName, '\r');
     if (End == NULL)
         return FALSE;
 
-    *End = TEXT('\0');
+    *End = '\0';
 
-    if (_tcslen(Context->UserName) == 0)
+    if (strlen(Context->UserName) == 0)
         return FALSE;
 
     ECHO(&Context->Device, "Password: ");
@@ -339,7 +339,7 @@ GetCredentials(
     if (!Success)
         return FALSE;
 
-    End = _tcschr(Password, TEXT('\r'));
+    End = strchr(Password, TEXT('\r'));
     if (End == NULL)
         return FALSE;
 
@@ -356,8 +356,8 @@ RequestElevation(
     PTTY_CONTEXT            Context = &TtyContext;
     TOKEN_ELEVATION_TYPE    Elevation;
     DWORD                   Size;
-    TCHAR                   Buffer[MAXIMUM_BUFFER_SIZE];
-    PTCHAR                  End;
+    CHAR                    Buffer[MAXIMUM_BUFFER_SIZE];
+    PCHAR                   End;
     TOKEN_LINKED_TOKEN      LinkedToken;
     BOOL                    Success;
 
@@ -385,18 +385,18 @@ RequestElevation(
     if (!Success)
         return FALSE;
 
-    End = _tcschr(Buffer, TEXT('\r'));
+    End = strchr(Buffer, '\r');
     if (End == NULL)
         return FALSE;
 
-    *End = TEXT('\0');
+    *End = '\0';
 
-    if (_tcslen(Buffer) == 0)
+    if (strlen(Buffer) == 0)
         return FALSE;
 
     ECHO(&Context->Device, "\r\n");
 
-    if (_tcscmp(Buffer, TEXT("yes")) != 0)
+    if (strcmp(Buffer, "yes") != 0)
         return TRUE;
 
     Success = GetTokenInformation(Context->Token,
@@ -514,7 +514,7 @@ _tmain(
     PTTY_CONTEXT        Context = &TtyContext;
     SECURITY_ATTRIBUTES Attributes;
     HANDLE              Handle[3];
-    TCHAR               Password[MAXIMUM_BUFFER_SIZE];
+    CHAR                Password[MAXIMUM_BUFFER_SIZE];
     DWORD               Index;
     BOOL                Success;
 
@@ -555,12 +555,12 @@ _tmain(
     if (!Success)
         ExitProcess(1);
 
-    Success = LogonUser(Context->UserName,
-                        NULL,
-                        Password,
-                        LOGON32_LOGON_INTERACTIVE,
-                        LOGON32_PROVIDER_DEFAULT,
-                        &Context->Token);
+    Success = LogonUserA(Context->UserName,
+                         NULL,
+                         Password,
+                         LOGON32_LOGON_INTERACTIVE,
+                         LOGON32_PROVIDER_DEFAULT,
+                         &Context->Token);
 
     ZeroMemory(Password, sizeof(Password));
 

@@ -326,7 +326,7 @@ __RemoveEntryList(
 static VOID
 PutString(
     _In_ HANDLE     Handle,
-    _In_ PUCHAR     Buffer,
+    _In_ PCHAR      Buffer,
     _In_ DWORD      Length
     )
 {
@@ -350,7 +350,7 @@ PutString(
 }
 
 #define ECHO(_Handle, _Buffer) \
-    PutString((_Handle), (PUCHAR)_Buffer, (DWORD)strlen((_Buffer)) * sizeof(CHAR))
+    PutString((_Handle), _Buffer, (DWORD)strlen((_Buffer)))
 
 DWORD WINAPI
 ConnectionThread(
@@ -359,7 +359,7 @@ ConnectionThread(
 {
     PMONITOR_CONNECTION Connection = (PMONITOR_CONNECTION)Argument;
     PMONITOR_CONSOLE    Console = Connection->Console;
-    UCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
+    CHAR                Buffer[MAXIMUM_BUFFER_SIZE];
     OVERLAPPED          Overlapped;
     HANDLE              Handle[2];
     DWORD               Length;
@@ -583,7 +583,7 @@ DeviceThread(
     PMONITOR_CONSOLE    Console = (PMONITOR_CONSOLE)Argument;
     OVERLAPPED          Overlapped;
     HANDLE              Device;
-    UCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
+    CHAR                Buffer[MAXIMUM_BUFFER_SIZE];
     DWORD               Length;
     DWORD               Wait;
     HANDLE              Handles[2];
