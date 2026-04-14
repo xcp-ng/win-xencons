@@ -62,26 +62,23 @@ TTY_CONTEXT TtyContext;
 static VOID
 #pragma prefast(suppress:6262) // Function uses '1036' bytes of stack: exceeds /analyze:stacksize'1024'
 __Log(
-    _In_ PCSTR          Format,
+    _In_ PCTSTR         Format,
     _In_ ...
     )
 {
-    CHAR                Buffer[MAXIMUM_BUFFER_SIZE];
+    TCHAR               Buffer[MAXIMUM_BUFFER_SIZE];
     va_list             Arguments;
     size_t              Length;
     HRESULT             Result;
 
     va_start(Arguments, Format);
-    Result = StringCchVPrintfA(Buffer,
-        MAXIMUM_BUFFER_SIZE,
-        Format,
-        Arguments);
+    Result = StringCchVPrintf(Buffer, MAXIMUM_BUFFER_SIZE, Format, Arguments);
     va_end(Arguments);
 
     if (Result != S_OK && Result != STRSAFE_E_INSUFFICIENT_BUFFER)
         return;
 
-    Result = StringCchLengthA(Buffer, MAXIMUM_BUFFER_SIZE, &Length);
+    Result = StringCchLength(Buffer, MAXIMUM_BUFFER_SIZE, &Length);
     if (Result != S_OK)
         return;
 
@@ -89,15 +86,15 @@ __Log(
 
     _Analysis_assume_(Length < MAXIMUM_BUFFER_SIZE);
     _Analysis_assume_(Length >= 2);
-    Buffer[Length] = '\0';
-    Buffer[Length - 1] = '\n';
-    Buffer[Length - 2] = '\r';
+    Buffer[Length] = _T('\0');
+    Buffer[Length - 1] = _T('\n');
+    Buffer[Length - 2] = _T('\r');
 
     OutputDebugString(Buffer);
 }
 
 #define Log(_Format, ...) \
-    __Log(__MODULE__ "|" __FUNCTION__ ": " _Format, __VA_ARGS__)
+        __Log(_T(__MODULE__ "|" __FUNCTION__ ": " _Format), __VA_ARGS__)
 
 static BOOL
 CreateChild(
