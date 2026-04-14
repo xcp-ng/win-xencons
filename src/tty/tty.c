@@ -102,13 +102,23 @@ CreateChild(
     )
 {
     PTTY_CONTEXT            Context = &TtyContext;
-    CHAR                    CommandLine[] = "c:\\windows\\system32\\cmd.exe /q /a";
+    CHAR                    SystemDir[MAX_PATH];
+    CHAR                    CommandLine[MAX_PATH];
     PVOID                   Environment;
     PROFILEINFOA            ProfileInfo;
     DWORD                   Size;
     CHAR                    ProfileDir[MAXIMUM_BUFFER_SIZE];
     STARTUPINFOA            StartupInfo;
     BOOL                    Success;
+
+    if (!GetSystemDirectoryA(SystemDir, sizeof(SystemDir)))
+        return FALSE;
+
+    if (!SUCCEEDED(StringCchPrintfA(CommandLine,
+                                    sizeof(CommandLine),
+                                    "%s\\cmd.exe /q /a",
+                                    SystemDir)))
+        return FALSE;
 
     Success = CreateEnvironmentBlock(&Environment,
                                      Context->Token,
