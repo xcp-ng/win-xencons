@@ -51,12 +51,10 @@ Tty_CopyFiles=11
 [SourceDisksFiles]
 xencons.sys=0,,
 xencons_monitor.exe=0,,
-xencons_monitor.dll=0,,
 xencons_tty.exe=0,,
 
 [Monitor_CopyFiles]
 xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,xencons_monitor.exe
-xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll,xencons_monitor.dll
 
 [Tty_CopyFiles]
 xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe,xencons_tty.exe
@@ -81,7 +79,7 @@ FeatureScore=0xFE
 xencons.sys
 
 [XenCons_Inst.Services]
-AddService=xencons_monitor,%SPSVCSINST_STARTSERVICE%,Monitor_Service,Monitor_EventLog
+AddService=xencons_monitor,%SPSVCSINST_STARTSERVICE%,Monitor_Service
 AddService=xencons,%SPSVCINST_ASSOCSERVICE%,XenCons_Service
 
 [XenCons_Service]
@@ -108,13 +106,6 @@ AddReg = Monitor_Parameters
 [Monitor_Parameters]
 HKR,"Parameters",,0x00000010
 HKR,"Parameters\default","Executable",0x00000000,"xencons_tty_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.exe"
-
-[Monitor_EventLog]
-AddReg=Monitor_EventLog_AddReg
-
-[Monitor_EventLog_AddReg]
-HKR,,EventMessageFile,0x00020000,"%%SystemRoot%%\System32\xencons_monitor_@MAJOR_VERSION@_@MINOR_VERSION@_@MICRO_VERSION@_@BUILD_NUMBER@.dll"
-HKR,,TypesSupported,0x00010001,7
 
 [Strings]
 
