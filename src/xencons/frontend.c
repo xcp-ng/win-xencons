@@ -52,7 +52,6 @@
 #include "util.h"
 
 #define FRONTEND_POOL 'TNRF'
-#define DOMID_INVALID (0x7FFFU)
 
 typedef enum _FRONTEND_STATE {
     FRONTEND_UNKNOWN,
